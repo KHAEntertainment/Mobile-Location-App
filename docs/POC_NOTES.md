@@ -22,15 +22,20 @@ Reports UA, platform, viewport, touch points, and Client Hints. (Desktop-mode id
 lands in Milestone 4; this build ships the mobile profile.)
 
 ## POC 5 — Local-network blocking (live)
-`LocalNetworkInterceptor` applies `LocalNetworkPolicy` at `shouldInterceptRequest`. The page
-actively attempts fetches to `127.0.0.1`, `192.168.0.1`, `10.0.0.1`, `[::1]`, the dword form
-`2130706433`, and a `ws://127.0.0.1` socket. **"blocked" = pass; "REACHED"/"OPEN" = fail.**
-Known gap: some pre-resolved / WebSocket paths and public-hostname-resolves-to-private are not
-fully interceptable app-side; those are called out rather than claimed as covered.
+`LocalNetworkInterceptor` applies `LocalNetworkPolicy` at `shouldInterceptRequest` for HTTP(S)
+subresources. The page smoke-tests fetches to `127.0.0.1`, `192.168.0.1`, `10.0.0.1`, `[::1]`,
+and the dword form `2130706433`. **Caveat:** because the page loads from `file://`, these fetches
+are also subject to CORS/opaque-origin rules, so a green here is *indicative, not proof* — a
+controlled `https://` page asserting on the `X-GeoAlign-Blocked` header gives the definitive
+result (planned). Documented limits (not app-interceptable, reported honestly, not claimed
+covered): **WebSocket** handshakes and **public-hostname-resolves-to-private** (DNS rebinding).
+The WS row targets a routable private host — a real connection there reads as **fail**.
 
 ## POC 6 — Capture + WebRTC
-`getUserMedia({audio,video})` must be **denied** (no camera/mic permission requested).
-ICE candidate gathering is inspected for any private/host address — zero leaky candidates = pass.
+`getUserMedia({audio,video})` must be **denied** (no camera/mic permission requested). WebRTC is
+neutralized in-page (`RTCPeerConnection` forced to relay-only with empty ICE servers), so no
+host/reflexive candidates are gathered. The ICE probe should report **0 candidates**, and any
+candidate exposing a private/host address is a **fail**.
 
 ## POC 7 — Storage isolation (informational)
 Sets a cookie + localStorage value so the eventual clear-session action can be verified to wipe

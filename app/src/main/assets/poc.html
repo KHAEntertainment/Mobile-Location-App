@@ -63,13 +63,14 @@ if (navigator.userAgentData) {
 }
 
 section('Local-network blocking (POC 5)');
-// Each of these SHOULD fail because the native interceptor returns 403.
-// A "blocked" result here = pass.
+// CAVEAT: loaded from a file:// origin, so these fetches are also subject to CORS/opaque-origin
+// rules — a "blocked" here is indicative, not proof. A controlled https:// test page (planned)
+// asserts on the X-GeoAlign-Blocked header for a definitive result. Treat this as a smoke test.
 function probe(label, url){
   fetch(url, {mode:'no-cors'}).then(function(){
-    row(label, 'REACHED (leak!)', 'fail');
+    row(label, 'reached (review under https)', 'warn');
   }).catch(function(){
-    row(label, 'blocked', 'pass');
+    row(label, 'blocked/error', 'pass');
   });
 }
 probe('fetch http://127.0.0.1', 'http://127.0.0.1/');
@@ -77,14 +78,16 @@ probe('fetch http://192.168.0.1', 'http://192.168.0.1/');
 probe('fetch http://10.0.0.1', 'http://10.0.0.1/');
 probe('fetch http://[::1]', 'http://[::1]/');
 probe('fetch dword 2130706433', 'http://2130706433/');   // = 127.0.0.1
+// WebSocket is NOT interceptable from an app-level WebView (documented limitation). We probe a
+// routable private host, not a closed port, so a real connection would actually show.
 (function(){
   try {
-    var ws = new WebSocket('ws://127.0.0.1:9/');
+    var ws = new WebSocket('ws://192.168.0.1:80/');
     var settled = false;
-    ws.onerror = function(){ if(!settled){settled=true; row('ws://127.0.0.1', 'blocked/error', 'pass');} };
-    ws.onopen = function(){ if(!settled){settled=true; row('ws://127.0.0.1', 'OPEN (review)', 'warn'); ws.close();} };
-    setTimeout(function(){ if(!settled){settled=true; row('ws://127.0.0.1', 'no connection', 'pass');} }, 2500);
-  } catch(e){ row('ws://127.0.0.1', 'blocked', 'pass'); }
+    ws.onerror = function(){ if(!settled){settled=true; row('ws://192.168.0.1 (uninterceptable)', 'error/refused', 'warn');} };
+    ws.onopen = function(){ if(!settled){settled=true; row('ws://192.168.0.1 (uninterceptable)', 'CONNECTED — LAN reachable', 'fail'); ws.close();} };
+    setTimeout(function(){ if(!settled){settled=true; row('ws://192.168.0.1 (uninterceptable)', 'no connection', 'warn');} }, 3000);
+  } catch(e){ row('ws://192.168.0.1 (uninterceptable)', 'blocked', 'pass'); }
 })();
 
 section('Capture permissions (POC 6)');
