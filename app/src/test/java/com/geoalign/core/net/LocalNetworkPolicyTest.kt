@@ -68,6 +68,16 @@ class LocalNetworkPolicyTest {
     @Test fun allowsIpv6Public() = allowed("[2606:4700:4700::1111]")   // Cloudflare
     @Test fun blocksIpv4MappedLoopback() = blocked("[::ffff:127.0.0.1]")
     @Test fun allowsIpv4MappedPublic() = allowed("[::ffff:8.8.8.8]")
+    @Test fun blocksIpv4CompatibleLoopback() = blocked("[::127.0.0.1]")   // deprecated ::a.b.c.d
+    @Test fun blocksIpv4CompatiblePrivate() = blocked("[::192.168.0.1]")
+    @Test fun blocks6to4RelayAnycast() = blocked("192.88.99.1")
+
+    // --- parser hardening (from adversarial review) -------------------------
+
+    @Test fun rejectsNegativeOctet() {
+        // "-1" must not slip past the >255 guard as a valid octet.
+        assertNull(LocalNetworkPolicy.parseIpv4Any("-1.0.0.1"))
+    }
 
     // --- Direct classifier unit checks --------------------------------------
 

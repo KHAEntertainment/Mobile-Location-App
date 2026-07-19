@@ -98,6 +98,7 @@ object LocalNetworkPolicy {
             a == 192L && b == 168L -> block("192.168.0.0/16 (private)")
             a == 192L && b == 0L && c == 0L -> block("192.0.0.0/24 (IETF)")
             a == 192L && b == 0L && c == 2L -> block("192.0.2.0/24 (TEST-NET-1)")
+            a == 192L && b == 88L && c == 99L -> block("192.88.99.0/24 (6to4 relay anycast)")
             a == 198L && b == 18L -> block("198.18.0.0/15 (benchmark)")
             a == 198L && b == 19L -> block("198.18.0.0/15 (benchmark)")
             a == 198L && b == 51L && c == 100L -> block("198.51.100.0/24 (TEST-NET-2)")
@@ -123,15 +124,22 @@ object LocalNetworkPolicy {
         // :: unspecified
         if (bytes.all { it.toInt() == 0 }) return block(":: (unspecified)")
 
-        // IPv4-mapped ::ffff:0:0/96 and IPv4-compatible — reclassify the embedded v4.
+        // Embedded IPv4: both IPv4-mapped (::ffff:a.b.c.d) and IPv4-compatible (::a.b.c.d).
+        // Reclassify the embedded v4 in either case. (:: and ::1 are already handled above.)
         val firstTenZero = (0 until 10).all { bytes[it].toInt() == 0 }
-        if (firstTenZero && ((bytes[10].toInt() and 0xFF) == 0xFF) && ((bytes[11].toInt() and 0xFF) == 0xFF)) {
-            val v4 = ((bytes[12].toLong() and 0xFF) shl 24) or
+        fun embeddedV4(): Long =
+            ((bytes[12].toLong() and 0xFF) shl 24) or
                 ((bytes[13].toLong() and 0xFF) shl 16) or
                 ((bytes[14].toLong() and 0xFF) shl 8) or
                 (bytes[15].toLong() and 0xFF)
-            val inner = classifyIpv4(v4)
+        if (firstTenZero && ((bytes[10].toInt() and 0xFF) == 0xFF) && ((bytes[11].toInt() and 0xFF) == 0xFF)) {
+            val inner = classifyIpv4(embeddedV4())
             return if (inner.isBlocked) block("IPv4-mapped ${inner.reason}") else Result(Decision.ALLOW, "IPv4-mapped public")
+        }
+        if (firstTenZero && bytes[10].toInt() == 0 && bytes[11].toInt() == 0) {
+            // ::a.b.c.d IPv4-compatible (deprecated). Classify the embedded v4.
+            val inner = classifyIpv4(embeddedV4())
+            return if (inner.isBlocked) block("IPv4-compatible ${inner.reason}") else Result(Decision.ALLOW, "IPv4-compatible public")
         }
 
         return when {
@@ -195,6 +203,7 @@ object LocalNetworkPolicy {
 
     private fun parseUintAnyRadix(s: String): Long? {
         if (s.isEmpty()) return null
+        if (s[0] == '-' || s[0] == '+') return null // reject signed; IP octets are unsigned
         return try {
             when {
                 s.startsWith("0x") || s.startsWith("0X") ->

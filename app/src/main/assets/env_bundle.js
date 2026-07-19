@@ -2,10 +2,14 @@
  * GeoAlign browser environment bundle.
  * Injected via WebViewCompat.addDocumentStartJavaScript BEFORE any page script runs,
  * into every frame. Placeholders __LAT__/__LNG__/__ACC__/__TZ__/__LANG__/__LANGS__ are
- * substituted natively at injection time. Runs in an isolated context where supported.
+ * substituted natively at injection time.
  *
- * Scope note: this is best-effort browser-level virtualization, NOT OS-level. The diagnostics
- * page reports any path that remains unmodified; the app does not claim complete virtualization.
+ * IMPORTANT (validated limitation): document-start scripts run in the page's MAIN JS world,
+ * not an isolated content-script world. These overrides are therefore best-effort and
+ * detectable, and a determined page may reach a native path (e.g. a freshly created child
+ * frame's clean navigator). Real-device-location safety does NOT rely on these shims: the app
+ * holds no Android location permission and BrowserPermissionPolicy denies the native geolocation
+ * prompt, so every bypass lands on permission-denied, never real GPS.
  */
 (function () {
   "use strict";
@@ -56,7 +60,17 @@
     Object.defineProperty(navigator, "geolocation", {
       value: virtualGeo, configurable: false, enumerable: true, writable: false,
     });
-  } catch (e) { /* leave native geolocation absent rather than throw */ }
+    // Also shadow the prototype getter so `Navigator.prototype.geolocation` cannot be used to
+    // reach the native object. Best-effort; ignored if the platform disallows it.
+    try {
+      Object.defineProperty(Navigator.prototype, "geolocation", {
+        get: function () { return virtualGeo; }, configurable: true, enumerable: true,
+      });
+    } catch (e2) {}
+  } catch (e) {
+    // If defineProperty throws, native navigator.geolocation remains PRESENT but un-shimmed.
+    // Real GPS is still unreachable because the native permission prompt is denied app-side.
+  }
 
   // ---- Language / locale alignment (spec §13) ----
   try {
@@ -85,7 +99,11 @@
         var parts = dtf.formatToParts(this);
         for (var i = 0; i < parts.length; i++) {
           if (parts[i].type === "timeZoneName") {
-            var m = /GMT([+-]\d{1,2})(?::?(\d{2}))?/.exec(parts[i].value);
+            var val = parts[i].value;
+            // A bare "GMT"/"UTC" (no signed digits) means offset 0 — e.g. Europe/London in winter.
+            // Without this, the regex misses and we'd leak the DEVICE's real offset.
+            if (/^(GMT|UTC)$/.test(val)) return 0;
+            var m = /(?:GMT|UTC)([+-]\d{1,2})(?::?(\d{2}))?/.exec(val);
             if (m) {
               var h = parseInt(m[1], 10);
               var mm = m[2] ? parseInt(m[2], 10) : 0;
@@ -95,14 +113,37 @@
           }
         }
       } catch (e) {}
-      return _getOffset.call(this);
+      // Fall back to 0 rather than the real device offset, to avoid a real-offset leak.
+      return 0;
     };
   } catch (e) {}
 
-  // Marker so the diagnostics page can confirm the bundle installed at document-start.
+  // ---- WebRTC leak neutralization (spec §17) ----
+  // WebRTC is disabled-by-default in the MVP. We can't set iceTransportPolicy from native, so we
+  // neutralize in-page: force relay-only and strip ICE servers, so no host/server-reflexive
+  // candidates (which would expose local or non-VPN addresses) are ever gathered. Data/media are
+  // effectively disabled; ordinary <video>/<audio> playback is unaffected (not WebRTC).
+  try {
+    var NativeRTC = window.RTCPeerConnection || window.webkitRTCPeerConnection;
+    if (NativeRTC) {
+      var GuardedRTC = function (config, constraints) {
+        config = config || {};
+        config.iceServers = [];               // no STUN/TURN → no reflexive/relay candidates
+        config.iceTransportPolicy = "relay";  // suppress host candidates
+        var pc = new NativeRTC(config, constraints);
+        return pc;
+      };
+      GuardedRTC.prototype = NativeRTC.prototype;
+      window.RTCPeerConnection = GuardedRTC;
+      if (window.webkitRTCPeerConnection) window.webkitRTCPeerConnection = GuardedRTC;
+    }
+  } catch (e) {}
+
+  // Diagnostics marker: presence only, no profile data (avoids re-exposing coords / narrowing
+  // fingerprint). The diagnostics page uses navigator.geolocation for the actual values.
   try {
     Object.defineProperty(window, "__GEOALIGN__", {
-      value: { installed: true, tz: TZ, lang: PRIMARY_LANG, lat: LAT, lng: LNG },
+      value: { installed: true },
       configurable: false, enumerable: false, writable: false,
     });
   } catch (e) {}
