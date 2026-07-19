@@ -62,19 +62,66 @@ if (navigator.userAgentData) {
   row('uaData.platform', navigator.userAgentData.platform);
 }
 
-section('Leak checks (POC 6, quick)');
-row('Real GPS reachable via other API', 'n/a in POC', 'warn');
-// WebRTC ICE probe (best-effort).
+section('Local-network blocking (POC 5)');
+// Each of these SHOULD fail because the native interceptor returns 403.
+// A "blocked" result here = pass.
+function probe(label, url){
+  fetch(url, {mode:'no-cors'}).then(function(){
+    row(label, 'REACHED (leak!)', 'fail');
+  }).catch(function(){
+    row(label, 'blocked', 'pass');
+  });
+}
+probe('fetch http://127.0.0.1', 'http://127.0.0.1/');
+probe('fetch http://192.168.0.1', 'http://192.168.0.1/');
+probe('fetch http://10.0.0.1', 'http://10.0.0.1/');
+probe('fetch http://[::1]', 'http://[::1]/');
+probe('fetch dword 2130706433', 'http://2130706433/');   // = 127.0.0.1
+(function(){
+  try {
+    var ws = new WebSocket('ws://127.0.0.1:9/');
+    var settled = false;
+    ws.onerror = function(){ if(!settled){settled=true; row('ws://127.0.0.1', 'blocked/error', 'pass');} };
+    ws.onopen = function(){ if(!settled){settled=true; row('ws://127.0.0.1', 'OPEN (review)', 'warn'); ws.close();} };
+    setTimeout(function(){ if(!settled){settled=true; row('ws://127.0.0.1', 'no connection', 'pass');} }, 2500);
+  } catch(e){ row('ws://127.0.0.1', 'blocked', 'pass'); }
+})();
+
+section('Capture permissions (POC 6)');
+if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+  navigator.mediaDevices.getUserMedia({audio:true, video:true}).then(function(s){
+    row('getUserMedia(cam+mic)', 'GRANTED (leak!)', 'fail');
+    s.getTracks().forEach(function(t){ t.stop(); });
+  }).catch(function(){ row('getUserMedia(cam+mic)', 'denied', 'pass'); });
+} else {
+  row('getUserMedia', 'unavailable', 'pass');
+}
+
+section('WebRTC ICE (POC 6)');
 try {
   var pc = new RTCPeerConnection({iceServers:[]});
   pc.createDataChannel('x');
   var found = [];
   pc.onicecandidate = function(e){
     if (e.candidate) { found.push(e.candidate.candidate); }
-    else { row('ICE candidates seen', found.length ? found.length+' (review)' : '0', found.length?'warn':'pass'); }
+    else {
+      row('ICE candidates seen', String(found.length), found.length?'warn':'pass');
+      // Flag any candidate exposing a private/host address.
+      var leaky = found.filter(function(c){ return /192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.|127\.|fe80|::1/.test(c); });
+      row('private-address candidates', String(leaky.length), leaky.length?'fail':'pass');
+    }
   };
   pc.createOffer().then(function(o){ return pc.setLocalDescription(o); });
 } catch(e){ row('WebRTC', 'unavailable/blocked', 'pass'); }
+
+section('Storage isolation (POC 7, informational)');
+try {
+  document.cookie = 'geoalign_poc=1; path=/';
+  localStorage.setItem('geoalign_poc', String(Date.now()));
+  row('cookie set', document.cookie.indexOf('geoalign_poc') >= 0 ? 'yes' : 'no');
+  row('localStorage set', localStorage.getItem('geoalign_poc') ? 'yes' : 'no');
+  row('note', 'Clear-session must wipe these; verify after toggling', 'warn');
+} catch(e){ row('storage', 'unavailable', 'warn'); }
 </script>
 </body>
 </html>

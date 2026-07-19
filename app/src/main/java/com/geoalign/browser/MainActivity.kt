@@ -21,6 +21,9 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.geoalign.core.readiness.ReadinessInputs
 import com.geoalign.core.readiness.ReadinessReducer
+import com.geoalign.web.policy.BrowserPermissionPolicy
+import com.geoalign.web.policy.LocalNetworkInterceptor
+import android.util.Log
 import org.json.JSONArray
 
 /**
@@ -80,6 +83,13 @@ private fun PocWebView(modifier: Modifier) {
                 if (WebViewFeature.isFeatureSupported(WebViewFeature.OFF_SCREEN_PRERASTER)) {
                     WebSettingsCompat.setOffscreenPreRaster(settings, true)
                 }
+
+                // POC 5: block local-network requests at the WebView boundary.
+                webViewClient = LocalNetworkInterceptor { url, reason ->
+                    Log.i("GeoAlign", "blocked local-network request ($reason)")
+                }
+                // POC 6 / permission policy: deny camera/mic and the native geolocation prompt.
+                webChromeClient = BrowserPermissionPolicy()
 
                 // Install the environment BEFORE any page script runs.
                 if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
