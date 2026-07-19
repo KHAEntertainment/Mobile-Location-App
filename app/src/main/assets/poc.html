@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GeoAlign POC Diagnostics</title>
+<style>
+  body { font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 16px; background:#0e1116; color:#e6edf3; }
+  h1 { font-size: 18px; }
+  .row { display:flex; justify-content:space-between; gap:12px; padding:6px 0; border-bottom:1px solid #21262d; }
+  .k { color:#8b949e; } .v { font-family: ui-monospace, monospace; text-align:right; word-break:break-all; }
+  .pass { color:#3fb950; } .warn { color:#d29922; } .fail { color:#f85149; }
+  h2 { font-size:14px; margin:18px 0 4px; color:#58a6ff; }
+</style>
+</head>
+<body>
+<h1>GeoAlign POC — live environment</h1>
+<div id="out"></div>
+<script>
+// Runs as a normal page script — it must observe the ALREADY-installed virtual environment.
+var out = document.getElementById('out');
+function section(t){ var h=document.createElement('h2'); h.textContent=t; out.appendChild(h); }
+function row(k,v,cls){
+  var d=document.createElement('div'); d.className='row';
+  var a=document.createElement('span'); a.className='k'; a.textContent=k;
+  var b=document.createElement('span'); b.className='v '+(cls||''); b.textContent=v;
+  d.appendChild(a); d.appendChild(b); out.appendChild(d);
+}
+
+section('Injection (POC 1)');
+var g = window.__GEOALIGN__;
+row('Document-start bundle installed', g ? 'yes' : 'NO', g ? 'pass':'fail');
+
+section('Virtual location (POC 1/2)');
+if (navigator.geolocation) {
+  navigator.geolocation.getCurrentPosition(function(p){
+    row('latitude', p.coords.latitude, 'pass');
+    row('longitude', p.coords.longitude, 'pass');
+    row('accuracy (m)', p.coords.accuracy);
+    row('speed', String(p.coords.speed));
+    row('heading', String(p.coords.heading));
+  }, function(err){ row('geolocation error', err.code+' '+err.message, 'warn'); });
+} else {
+  row('navigator.geolocation', 'absent', 'warn');
+}
+
+section('Regional signals (POC 3)');
+row('Intl timeZone', Intl.DateTimeFormat().resolvedOptions().timeZone);
+row('getTimezoneOffset (min)', new Date().getTimezoneOffset());
+row('local date', new Date().toString());
+row('navigator.language', navigator.language);
+row('navigator.languages', JSON.stringify(navigator.languages));
+
+section('Browser identity (POC 4)');
+row('navigator.userAgent', navigator.userAgent);
+row('navigator.platform', navigator.platform || '(hidden)');
+row('viewport', window.innerWidth+'x'+window.innerHeight);
+row('devicePixelRatio', window.devicePixelRatio);
+row('maxTouchPoints', navigator.maxTouchPoints);
+if (navigator.userAgentData) {
+  row('uaData.mobile', String(navigator.userAgentData.mobile));
+  row('uaData.platform', navigator.userAgentData.platform);
+}
+
+section('Leak checks (POC 6, quick)');
+row('Real GPS reachable via other API', 'n/a in POC', 'warn');
+// WebRTC ICE probe (best-effort).
+try {
+  var pc = new RTCPeerConnection({iceServers:[]});
+  pc.createDataChannel('x');
+  var found = [];
+  pc.onicecandidate = function(e){
+    if (e.candidate) { found.push(e.candidate.candidate); }
+    else { row('ICE candidates seen', found.length ? found.length+' (review)' : '0', found.length?'warn':'pass'); }
+  };
+  pc.createOffer().then(function(o){ return pc.setLocalDescription(o); });
+} catch(e){ row('WebRTC', 'unavailable/blocked', 'pass'); }
+</script>
+</body>
+</html>
