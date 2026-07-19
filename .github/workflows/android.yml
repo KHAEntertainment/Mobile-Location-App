@@ -7,8 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# contents:write is needed so a successful main build can publish the APK as a Release asset.
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -38,11 +39,17 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace
 
-      - name: Upload debug APK
+      - name: Stage APK with a friendly name
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/geoalign-debug-${GITHUB_SHA::7}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/geoalign-latest-debug.apk"
+
+      - name: Upload debug APK artifact (backup)
         uses: actions/upload-artifact@v4
         with:
           name: geoalign-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: dist/geoalign-latest-debug.apk
           if-no-files-found: warn
 
       - name: Upload unit test report
@@ -51,3 +58,25 @@ jobs:
         with:
           name: unit-test-report
           path: app/build/reports/tests/testDebugUnitTest/
+
+      # Publish the raw APK to a rolling "latest" pre-release on every successful main build.
+      # One stable URL, direct .apk download (no zip), no 90-day expiry.
+      - name: Publish rolling latest release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest-debug
+          name: "Latest debug build"
+          body: |
+            Auto-published debug APK from the newest `main` build.
+            Commit: ${{ github.sha }}
+            Build run: ${{ github.run_number }}
+
+            Sideloadable (debug-signed). Download `geoalign-latest-debug.apk` below.
+            The commit-stamped copy is kept for reference.
+          prerelease: true
+          files: |
+            dist/geoalign-latest-debug.apk
+            dist/geoalign-debug-*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
