@@ -31,7 +31,7 @@ import com.geoalign.web.policy.LocalNetworkInterceptor
 import android.util.Log
 import org.json.JSONArray
 
-private enum class Screen { Dashboard, Diagnostics, Editor }
+private enum class Screen { Dashboard, Diagnostics, Editor, Browser }
 
 /**
  * App entry point. Home is the readiness dashboard (spec §25); the POC diagnostics WebView and the
@@ -56,9 +56,11 @@ class MainActivity : ComponentActivity() {
                             PocWebView(Modifier.fillMaxSize())
                         }
                         Screen.Editor -> ProfileEditor(onDone = { screen = Screen.Dashboard })
+                        Screen.Browser -> BrowserScreen(onExit = { screen = Screen.Dashboard })
                         Screen.Dashboard -> ReadinessDashboard(
                             onOpenDiagnostics = { screen = Screen.Diagnostics },
                             onEditProfile = { screen = Screen.Editor },
+                            onOpenBrowser = { screen = Screen.Browser },
                         )
                     }
                     }

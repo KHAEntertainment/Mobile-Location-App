@@ -42,7 +42,11 @@ import java.util.UUID
  * Intentionally a thin, ViewModel-free MVP screen driven by a coroutine scope.
  */
 @Composable
-fun ReadinessDashboard(onOpenDiagnostics: () -> Unit, onEditProfile: () -> Unit) {
+fun ReadinessDashboard(
+    onOpenDiagnostics: () -> Unit,
+    onEditProfile: () -> Unit,
+    onOpenBrowser: () -> Unit,
+) {
     val context = LocalContext.current
     val service = remember { AppGraph.readinessService(context) }
     val store = remember { AppGraph.profileStore(context) }
@@ -111,8 +115,11 @@ fun ReadinessDashboard(onOpenDiagnostics: () -> Unit, onEditProfile: () -> Unit)
             Text("Active profile: $it", style = MaterialTheme.typography.bodyMedium)
         }
 
+        val canOpenBrowser = eval?.state?.canOpenBrowser == true
+        Button(onClick = onOpenBrowser, enabled = canOpenBrowser) { Text("Open browser") }
+
         val canMatch = !loading && eval?.geolocation?.hasCoordinates == true
-        Button(onClick = { matchToVpn() }, enabled = canMatch) { Text("Match browser to VPN") }
+        OutlinedButton(onClick = { matchToVpn() }, enabled = canMatch) { Text("Match browser to VPN") }
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = { refresh() }, enabled = !loading) { Text("Check again") }
