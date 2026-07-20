@@ -5,10 +5,12 @@ import android.os.Bundle
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -41,6 +43,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
+                    // targetSdk 35 forces edge-to-edge; pad for status bar, nav bar, and cutout so
+                    // content isn't hidden under the notch/system bars.
+                    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
                     var screen by remember { mutableStateOf(Screen.Dashboard) }
                     when (screen) {
                         Screen.Diagnostics -> Column(Modifier.fillMaxSize()) {
@@ -55,6 +60,7 @@ class MainActivity : ComponentActivity() {
                             onOpenDiagnostics = { screen = Screen.Diagnostics },
                             onEditProfile = { screen = Screen.Editor },
                         )
+                    }
                     }
                 }
             }
