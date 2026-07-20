@@ -29,9 +29,12 @@ import androidx.compose.ui.unit.dp
 import com.geoalign.core.readiness.ReadinessLevel
 import com.geoalign.core.readiness.VpnTransport
 import com.geoalign.data.net.EffectiveIpUtil
+import com.geoalign.data.profiles.ProfileFactory
 import com.geoalign.data.readiness.ReadinessService
 import com.geoalign.di.AppGraph
 import kotlinx.coroutines.launch
+import java.util.Locale
+import java.util.UUID
 
 /**
  * Readiness dashboard (spec §25). Composes the live [ReadinessService] evaluation into a simple
@@ -48,16 +51,42 @@ fun ReadinessDashboard(onOpenDiagnostics: () -> Unit) {
     var loading by remember { mutableStateOf(true) }
     var eval by remember { mutableStateOf<ReadinessService.Evaluation?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var activeProfileName by remember { mutableStateOf<String?>(null) }
 
     fun refresh() {
         loading = true
         error = null
         scope.launch {
             runCatching {
+                activeProfileName = store.list().firstOrNull()?.name
                 val profileSelected = store.list().isNotEmpty()
                 service.evaluate(profileSelected = profileSelected)
             }.onSuccess { eval = it; loading = false }
                 .onFailure { error = it.message ?: "readiness check failed"; loading = false }
+        }
+    }
+
+    // One-tap "Match Browser to VPN" (spec §9): turn the live IP-geolocation estimate into a saved
+    // profile. MVP keeps a single active profile, so we replace any existing one.
+    fun matchToVpn() {
+        val geo = eval?.geolocation ?: return
+        if (geo.latitude == null || geo.longitude == null) return
+        loading = true
+        error = null
+        scope.launch {
+            runCatching {
+                val profile = ProfileFactory.fromGeolocation(
+                    geo = geo,
+                    contentLanguage = Locale.getDefault().language.ifBlank { "en" },
+                    id = UUID.randomUUID().toString(),
+                    nowMillis = System.currentTimeMillis(),
+                ) ?: throw IllegalStateException("estimate lacked coordinates")
+                store.clear()
+                store.upsert(profile)
+                activeProfileName = profile.name
+                service.evaluate(profileSelected = true)
+            }.onSuccess { eval = it; loading = false }
+                .onFailure { error = it.message ?: "could not save profile"; loading = false }
         }
     }
 
@@ -78,8 +107,15 @@ fun ReadinessDashboard(onOpenDiagnostics: () -> Unit) {
             eval != null -> ReadinessContent(eval!!)
         }
 
+        activeProfileName?.let {
+            Text("Active profile: $it", style = MaterialTheme.typography.bodyMedium)
+        }
+
+        val canMatch = !loading && eval?.geolocation?.hasCoordinates == true
+        Button(onClick = { matchToVpn() }, enabled = canMatch) { Text("Match browser to VPN") }
+
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = { refresh() }, enabled = !loading) { Text("Check again") }
+            OutlinedButton(onClick = { refresh() }, enabled = !loading) { Text("Check again") }
             OutlinedButton(onClick = onOpenDiagnostics) { Text("Open diagnostics") }
         }
 
