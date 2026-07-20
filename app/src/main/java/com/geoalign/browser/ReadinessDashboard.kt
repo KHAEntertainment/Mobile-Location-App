@@ -115,11 +115,49 @@ fun ReadinessDashboard(
             Text("Active profile: $it", style = MaterialTheme.typography.bodyMedium)
         }
 
-        val canOpenBrowser = eval?.state?.canOpenBrowser == true
-        Button(onClick = onOpenBrowser, enabled = canOpenBrowser) { Text("Open browser") }
-
+        val hasProfile = activeProfileName != null
         val canMatch = !loading && eval?.geolocation?.hasCoordinates == true
-        OutlinedButton(onClick = { matchToVpn() }, enabled = canMatch) { Text("Match browser to VPN") }
+        val canOpenBrowser = eval?.state?.canOpenBrowser == true
+        val exitCity = eval?.geolocation?.city
+
+        // Plain-language next step so the flow is obvious.
+        val nextStepHint = when {
+            !hasProfile && canMatch ->
+                "Next step: tap “Match browser to VPN” to align the browser with your exit" +
+                    (exitCity?.let { " ($it)" } ?: "") + "."
+            hasProfile && canOpenBrowser ->
+                "Ready — open the browser to browse from " + (exitCity ?: "your aligned location") + "."
+            !hasProfile ->
+                "Waiting for VPN and location before you can match a profile."
+            else -> null
+        }
+        nextStepHint?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+
+        // Step-ordered actions: Match is the emphasized primary until a profile exists, then the
+        // emphasis moves to Open browser (which stays disabled until then).
+        if (!hasProfile) {
+            Button(
+                onClick = { matchToVpn() },
+                enabled = canMatch,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Match browser to VPN") }
+            OutlinedButton(
+                onClick = onOpenBrowser,
+                enabled = false,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Open browser") }
+        } else {
+            OutlinedButton(
+                onClick = { matchToVpn() },
+                enabled = canMatch,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Re-match to VPN") }
+            Button(
+                onClick = onOpenBrowser,
+                enabled = canOpenBrowser,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Open browser") }
+        }
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = { refresh() }, enabled = !loading) { Text("Check again") }
@@ -140,11 +178,15 @@ private fun ReadinessContent(eval: ReadinessService.Evaluation) {
     val state = eval.state
     val inputs = eval.inputs
 
-    val (headline, tone) = when (state.level) {
-        ReadinessLevel.READY -> "Ready" to MaterialTheme.colorScheme.primary
-        ReadinessLevel.READY_WITH_WARNINGS -> "Ready — with warnings" to MaterialTheme.colorScheme.tertiary
-        ReadinessLevel.BLOCKED_NO_VPN -> "Not ready — no VPN detected" to MaterialTheme.colorScheme.error
-        ReadinessLevel.CHECKING -> "Checking…" to MaterialTheme.colorScheme.onSurface
+    val (headline, tone) = when {
+        state.level == ReadinessLevel.READY -> "Ready" to MaterialTheme.colorScheme.primary
+        state.level == ReadinessLevel.READY_WITH_WARNINGS && !inputs.profileSelected ->
+            "Almost ready — 1 step left" to MaterialTheme.colorScheme.tertiary
+        state.level == ReadinessLevel.READY_WITH_WARNINGS ->
+            "Ready — with warnings" to MaterialTheme.colorScheme.tertiary
+        state.level == ReadinessLevel.BLOCKED_NO_VPN ->
+            "Not ready — no VPN detected" to MaterialTheme.colorScheme.error
+        else -> "Checking…" to MaterialTheme.colorScheme.onSurface
     }
 
     Card(modifier = Modifier.fillMaxWidth()) {

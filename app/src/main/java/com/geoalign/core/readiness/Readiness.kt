@@ -89,7 +89,7 @@ object ReadinessReducer {
             warnings += "IPv4 and IPv6 appear to exit in different locations — a possible leak path."
         }
         if (!i.profileSelected) {
-            warnings += "No browser location profile is selected yet."
+            warnings += "No browser profile yet — tap \"Match browser to VPN\" to create one."
         }
 
         val allCoreOk = i.internetReachable == StepState.OK &&
