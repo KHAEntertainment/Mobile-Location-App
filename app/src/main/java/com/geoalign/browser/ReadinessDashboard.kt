@@ -42,7 +42,7 @@ import java.util.UUID
  * Intentionally a thin, ViewModel-free MVP screen driven by a coroutine scope.
  */
 @Composable
-fun ReadinessDashboard(onOpenDiagnostics: () -> Unit) {
+fun ReadinessDashboard(onOpenDiagnostics: () -> Unit, onEditProfile: () -> Unit) {
     val context = LocalContext.current
     val service = remember { AppGraph.readinessService(context) }
     val store = remember { AppGraph.profileStore(context) }
@@ -116,8 +116,9 @@ fun ReadinessDashboard(onOpenDiagnostics: () -> Unit) {
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(onClick = { refresh() }, enabled = !loading) { Text("Check again") }
-            OutlinedButton(onClick = onOpenDiagnostics) { Text("Open diagnostics") }
+            OutlinedButton(onClick = onEditProfile) { Text("Edit profile") }
         }
+        OutlinedButton(onClick = onOpenDiagnostics) { Text("Open diagnostics") }
 
         Text(
             "This app does not operate the VPN or change Android's system GPS. Location changes " +

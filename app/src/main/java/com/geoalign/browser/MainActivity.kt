@@ -29,9 +29,11 @@ import com.geoalign.web.policy.LocalNetworkInterceptor
 import android.util.Log
 import org.json.JSONArray
 
+private enum class Screen { Dashboard, Diagnostics, Editor }
+
 /**
- * App entry point. Home is the readiness dashboard (spec §25); the POC diagnostics WebView is
- * reachable from it via "Open diagnostics" so the on-device environment can still be verified.
+ * App entry point. Home is the readiness dashboard (spec §25); the POC diagnostics WebView and the
+ * profile editor are reachable from it.
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,17 +41,20 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    var showDiagnostics by remember { mutableStateOf(false) }
-                    if (showDiagnostics) {
-                        Column(Modifier.fillMaxSize()) {
+                    var screen by remember { mutableStateOf(Screen.Dashboard) }
+                    when (screen) {
+                        Screen.Diagnostics -> Column(Modifier.fillMaxSize()) {
                             OutlinedButton(
-                                onClick = { showDiagnostics = false },
+                                onClick = { screen = Screen.Dashboard },
                                 modifier = Modifier.padding(8.dp),
                             ) { Text("← Back to readiness") }
                             PocWebView(Modifier.fillMaxSize())
                         }
-                    } else {
-                        ReadinessDashboard(onOpenDiagnostics = { showDiagnostics = true })
+                        Screen.Editor -> ProfileEditor(onDone = { screen = Screen.Dashboard })
+                        Screen.Dashboard -> ReadinessDashboard(
+                            onOpenDiagnostics = { screen = Screen.Diagnostics },
+                            onEditProfile = { screen = Screen.Editor },
+                        )
                     }
                 }
             }
