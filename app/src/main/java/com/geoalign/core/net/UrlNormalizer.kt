@@ -15,8 +15,16 @@ object UrlNormalizer {
         val input = raw?.trim() ?: return null
         if (input.isEmpty()) return null
 
-        // Already has an explicit scheme — keep it (the HTTP warning flow handles cleartext later).
+        // Scheme with an authority — http://, https://, custom:// — keep as-is.
         if (Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://").containsMatchIn(input)) {
+            return input
+        }
+
+        // Opaque scheme like about:blank or mailto:x — colon followed by a non-digit, non-slash
+        // char. Excludes host:port (e.g. localhost:8080, where the char after ':' is a digit).
+        if (!input.startsWith("localhost") &&
+            Regex("^[a-zA-Z][a-zA-Z0-9+.-]*:[^0-9/\\s]").containsMatchIn(input)
+        ) {
             return input
         }
 
