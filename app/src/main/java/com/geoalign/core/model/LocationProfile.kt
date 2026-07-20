@@ -1,10 +1,13 @@
 package com.geoalign.core.model
 
+import kotlinx.serialization.Serializable
+
 /**
  * A browser location profile (spec §9): the user-facing/editable environment the browser applies.
  * Defaults to a *stationary* position — speed 0, no heading, no altitude — and a plausible (not
- * falsely precise) accuracy. Serializable-friendly (plain data class) for Room/Kotlinx storage.
+ * falsely precise) accuracy. @Serializable so it persists via kotlinx.serialization to a file.
  */
+@Serializable
 data class LocationProfile(
     val id: String,
     val name: String,
@@ -38,4 +41,5 @@ data class LocationProfile(
     }
 }
 
+@Serializable
 enum class MeasurementSystem { METRIC, IMPERIAL }

@@ -63,9 +63,8 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.room.runtime)
-    implementation(libs.room.ktx)
-    // annotationProcessor/ksp for Room added when persistence lands in M2.
+    // Persistence: kotlinx.serialization to a JSON file (profiles) + Android Keystore for the
+    // API key. Deliberately no Room/annotation-processor for the MVP — simpler, fewer deps.
 
     debugImplementation(libs.androidx.ui.tooling)
 
