@@ -10,26 +10,28 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
-import com.geoalign.core.readiness.ReadinessInputs
-import com.geoalign.core.readiness.ReadinessReducer
 import com.geoalign.web.policy.BrowserPermissionPolicy
 import com.geoalign.web.policy.LocalNetworkInterceptor
 import android.util.Log
 import org.json.JSONArray
 
 /**
- * POC harness (Milestone 1). This is NOT the production browser — it wires the document-start
- * environment bundle into a hardened WebView and loads the bundled POC diagnostics page so the
- * injection/timezone/locale/identity behavior can be verified on a real device.
+ * App entry point. Home is the readiness dashboard (spec §25); the POC diagnostics WebView is
+ * reachable from it via "Open diagnostics" so the on-device environment can still be verified.
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,16 +39,17 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    Column {
-                        val featureOk = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
-                        // Demonstrate the pure readiness reducer producing a state string.
-                        val state = ReadinessReducer.reduce(ReadinessInputs())
-                        Text(
-                            text = "Document-start supported: $featureOk   •   readiness=${state.level}",
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        PocWebView(Modifier.fillMaxSize())
+                    var showDiagnostics by remember { mutableStateOf(false) }
+                    if (showDiagnostics) {
+                        Column(Modifier.fillMaxSize()) {
+                            OutlinedButton(
+                                onClick = { showDiagnostics = false },
+                                modifier = Modifier.padding(8.dp),
+                            ) { Text("← Back to readiness") }
+                            PocWebView(Modifier.fillMaxSize())
+                        }
+                    } else {
+                        ReadinessDashboard(onOpenDiagnostics = { showDiagnostics = true })
                     }
                 }
             }
