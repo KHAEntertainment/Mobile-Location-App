@@ -116,6 +116,64 @@
       // Fall back to 0 rather than the real device offset, to avoid a real-offset leak.
       return 0;
     };
+
+    // Date string methods (toString/toDateString/toTimeString) render in the DEVICE zone by
+    // default — a contradiction with the Intl/offset overrides above (on-device test showed
+    // "GMT-0700 (Pacific Daylight Time)" while Intl said Europe/London). Re-render them in TZ.
+    var _origToString = Date.prototype.toString;
+    function tzOffsetLabel(d) {
+      try {
+        var p = new _DTF("en-US", { timeZone: TZ, timeZoneName: "longOffset" }).formatToParts(d);
+        for (var i = 0; i < p.length; i++) if (p[i].type === "timeZoneName") return p[i].value.replace(":", "");
+      } catch (e) {}
+      return "GMT";
+    }
+    function tzLongName(d) {
+      try {
+        var p = new _DTF("en-US", { timeZone: TZ, timeZoneName: "long" }).formatToParts(d);
+        for (var i = 0; i < p.length; i++) if (p[i].type === "timeZoneName") return p[i].value;
+      } catch (e) {}
+      return TZ;
+    }
+    function tzFields(d) {
+      var out = {};
+      new _DTF("en-US", {
+        timeZone: TZ, weekday: "short", year: "numeric", month: "short", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+      }).formatToParts(d).forEach(function (p) { out[p.type] = p.value; });
+      return out;
+    }
+    Date.prototype.toString = function () {
+      if (isNaN(this.getTime())) return _origToString.call(this);
+      try {
+        var f = tzFields(this);
+        var hh = f.hour === "24" ? "00" : f.hour;
+        return f.weekday + " " + f.month + " " + f.day + " " + f.year + " " +
+          hh + ":" + f.minute + ":" + f.second + " " + tzOffsetLabel(this) + " (" + tzLongName(this) + ")";
+      } catch (e) { return _origToString.call(this); }
+    };
+    Date.prototype.toDateString = function () {
+      try {
+        var f = tzFields(this);
+        return f.weekday + " " + f.month + " " + f.day + " " + f.year;
+      } catch (e) { return _origToString.call(this); }
+    };
+    Date.prototype.toTimeString = function () {
+      try {
+        var f = tzFields(this);
+        var hh = f.hour === "24" ? "00" : f.hour;
+        return hh + ":" + f.minute + ":" + f.second + " " + tzOffsetLabel(this) + " (" + tzLongName(this) + ")";
+      } catch (e) { return _origToString.call(this); }
+    };
+    // toLocale* default their timeZone to TZ so display formatting matches too.
+    ["toLocaleString", "toLocaleDateString", "toLocaleTimeString"].forEach(function (m) {
+      var orig = Date.prototype[m];
+      Date.prototype[m] = function (locales, options) {
+        options = options || {};
+        if (options.timeZone === undefined) options.timeZone = TZ;
+        return orig.call(this, locales || PRIMARY_LANG, options);
+      };
+    });
   } catch (e) {}
 
   // ---- WebRTC leak neutralization (spec §17) ----
