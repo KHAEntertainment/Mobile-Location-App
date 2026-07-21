@@ -18,6 +18,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +31,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,31 +39,37 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.webkit.ScriptHandler
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import com.geoalign.core.device.DeviceProfile
+import com.geoalign.core.device.DeviceProfiles
 import com.geoalign.core.model.LocationProfile
 import com.geoalign.core.net.UrlNormalizer
 import com.geoalign.core.tabs.TabListReducer
 import com.geoalign.core.tabs.TabsState
 import com.geoalign.di.AppGraph
+import com.geoalign.web.environment.DeviceBundleCompiler
 import com.geoalign.web.environment.EnvBundleCompiler
 import com.geoalign.web.policy.BrowserWebChromeClient
 import com.geoalign.web.policy.BrowserWebViewClient
+import kotlinx.coroutines.launch
 
 private const val HOME_URL = "https://duckduckgo.com/"
 
 /**
- * Milestone 3 slice 2 — a multi-tab browser shell (spec §10, §11). Uses the *single active WebView*
- * model: one hardened WebView with the profile environment injected once, and each tab's page state
- * parked via [WebView.saveState]/[WebView.restoreState] keyed by the pure [TabsState] tab id. Only
- * the active tab is ever rendered, so memory stays flat as tabs are opened.
+ * Milestone 3 slice 3 — multi-tab browser with device emulation (spec §10, §11, §14). One hardened
+ * WebView presents the emulated device's User-Agent and JS-visible hardware signals; each tab's page
+ * state is parked via [WebView.saveState]/[WebView.restoreState] keyed by the pure [TabsState] tab id.
+ * The active device is chosen from the profile and can be switched live from the toolbar.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun BrowserScreen(onExit: () -> Unit) {
     val context = LocalContext.current
     val store = remember { AppGraph.profileStore(context) }
+    val scope = rememberCoroutineScope()
 
     var profile by remember { mutableStateOf<LocationProfile?>(null) }
     var loaded by remember { mutableStateOf(false) }
@@ -84,6 +93,10 @@ fun BrowserScreen(onExit: () -> Unit) {
     }
 
     var webView by remember { mutableStateOf<WebView?>(null) }
+    var deviceScript by remember { mutableStateOf<ScriptHandler?>(null) }
+    var device by remember { mutableStateOf(DeviceProfiles.forProfile(activeProfile)) }
+    var deviceMenuOpen by remember { mutableStateOf(false) }
+
     var tabs by remember { mutableStateOf(TabsState.initial(HOME_URL)) }
     // The tab whose page is currently loaded into the single WebView. Kept in sync with tabs.activeId
     // through the swap helpers below.
@@ -146,6 +159,27 @@ fun BrowserScreen(onExit: () -> Unit) {
         webView?.loadUrl(url)
     }
 
+    // Switch the emulated device live: swap the UA string, re-inject the device bundle, reload, and
+    // persist the choice back to the active profile so it sticks next session.
+    fun changeDevice(newDevice: DeviceProfile) {
+        deviceMenuOpen = false
+        if (newDevice.id == device.id) return
+        device = newDevice
+        webView?.let { wv ->
+            wv.settings.userAgentString = newDevice.userAgent
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                deviceScript?.remove()
+                deviceScript = WebViewCompat.addDocumentStartJavaScript(
+                    wv, DeviceBundleCompiler.compileFromAssets(wv.context, newDevice), setOf("*"),
+                )
+            }
+            wv.reload()
+        }
+        scope.launch {
+            runCatching { store.upsert(activeProfile.copy(userAgentProfileId = newDevice.id)) }
+        }
+    }
+
     BackHandler(enabled = canBack) { webView?.goBack() }
 
     Column(Modifier.fillMaxSize()) {
@@ -182,6 +216,19 @@ fun BrowserScreen(onExit: () -> Unit) {
                 Text(if (loadingPage) "✕" else "⟳")
             }
             TextButton(onClick = { load(HOME_URL) }) { Text("⌂") }
+
+            Box {
+                TextButton(onClick = { deviceMenuOpen = true }) { Text("Device") }
+                DropdownMenu(expanded = deviceMenuOpen, onDismissRequest = { deviceMenuOpen = false }) {
+                    DeviceProfiles.ALL.forEach { d ->
+                        DropdownMenuItem(
+                            text = { Text((if (d.id == device.id) "✓ " else "") + d.displayName) },
+                            onClick = { changeDevice(d) },
+                        )
+                    }
+                }
+            }
+
             TextButton(onClick = onExit) { Text("Done") }
         }
 
@@ -213,6 +260,8 @@ fun BrowserScreen(onExit: () -> Unit) {
                         @Suppress("DEPRECATION")
                         allowUniversalAccessFromFileURLs = false
                         mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                        // Present the emulated device's UA from the very first request.
+                        userAgentString = device.userAgent
                     }
                     if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) {
                         WebSettingsCompat.setSafeBrowsingEnabled(settings, true)
@@ -234,11 +283,15 @@ fun BrowserScreen(onExit: () -> Unit) {
                         onTitle = { title -> tabs = TabListReducer.updateTab(tabs, attachedTabId, title = title) },
                     )
 
-                    // Install the active profile's environment before any page script runs. This is a
-                    // WebView-wide document-start hook, so it applies to every tab loaded here.
+                    // Document-start hooks (order: location environment, then device signals). Both are
+                    // WebView-wide, so they apply to every tab loaded here.
                     if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-                        val script = EnvBundleCompiler.compileFromAssets(ctx, activeProfile)
-                        WebViewCompat.addDocumentStartJavaScript(this, script, setOf("*"))
+                        WebViewCompat.addDocumentStartJavaScript(
+                            this, EnvBundleCompiler.compileFromAssets(ctx, activeProfile), setOf("*"),
+                        )
+                        deviceScript = WebViewCompat.addDocumentStartJavaScript(
+                            this, DeviceBundleCompiler.compileFromAssets(ctx, device), setOf("*"),
+                        )
                     }
 
                     loadUrl(HOME_URL)
