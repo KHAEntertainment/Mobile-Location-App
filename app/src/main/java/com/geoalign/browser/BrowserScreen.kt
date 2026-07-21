@@ -1,19 +1,24 @@
 package com.geoalign.browser
 
 import android.annotation.SuppressLint
+import android.os.Bundle
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -36,6 +41,8 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.geoalign.core.model.LocationProfile
 import com.geoalign.core.net.UrlNormalizer
+import com.geoalign.core.tabs.TabListReducer
+import com.geoalign.core.tabs.TabsState
 import com.geoalign.di.AppGraph
 import com.geoalign.web.environment.EnvBundleCompiler
 import com.geoalign.web.policy.BrowserWebChromeClient
@@ -44,9 +51,10 @@ import com.geoalign.web.policy.BrowserWebViewClient
 private const val HOME_URL = "https://duckduckgo.com/"
 
 /**
- * Milestone 3 slice 1 — a single-tab browser shell (spec §10). Loads the active profile's
- * environment into a hardened WebView with the local-network and permission policies wired in,
- * and drives an address bar + back/forward/refresh/home toolbar. Tabs and desktop mode follow.
+ * Milestone 3 slice 2 — a multi-tab browser shell (spec §10, §11). Uses the *single active WebView*
+ * model: one hardened WebView with the profile environment injected once, and each tab's page state
+ * parked via [WebView.saveState]/[WebView.restoreState] keyed by the pure [TabsState] tab id. Only
+ * the active tab is ever rendered, so memory stays flat as tabs are opened.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -76,21 +84,93 @@ fun BrowserScreen(onExit: () -> Unit) {
     }
 
     var webView by remember { mutableStateOf<WebView?>(null) }
+    var tabs by remember { mutableStateOf(TabsState.initial(HOME_URL)) }
+    // The tab whose page is currently loaded into the single WebView. Kept in sync with tabs.activeId
+    // through the swap helpers below.
+    var attachedTabId by remember { mutableStateOf(tabs.activeId) }
+    val savedStates = remember { mutableMapOf<Long, Bundle>() }
+
     var address by remember { mutableStateOf(HOME_URL) }
     var progress by remember { mutableStateOf(0) }
     var loadingPage by remember { mutableStateOf(false) }
     var canBack by remember { mutableStateOf(false) }
     var canForward by remember { mutableStateOf(false) }
 
+    // Park the WebView's current page under the attached tab so it can be restored later.
+    fun persistAttached() {
+        val wv = webView ?: return
+        val b = Bundle()
+        if (wv.saveState(b) != null) savedStates[attachedTabId] = b
+    }
+
+    // Load the given tab into the WebView: restore its parked page, or fetch its url fresh.
+    fun bindTabToWebView(id: Long) {
+        val wv = webView ?: return
+        val tab = tabs.tabs.firstOrNull { it.id == id } ?: return
+        val saved = savedStates[id]
+        if (saved != null) wv.restoreState(saved) else wv.loadUrl(tab.url)
+        attachedTabId = id
+        address = tab.url
+        // Reset the transient chrome; the callbacks will repopulate as the page settles.
+        progress = 0
+        loadingPage = false
+        canBack = wv.canGoBack()
+        canForward = wv.canGoForward()
+    }
+
+    fun switchTo(id: Long) {
+        if (id == tabs.activeId) return
+        persistAttached()
+        tabs = TabListReducer.selectTab(tabs, id)
+        bindTabToWebView(tabs.activeId)
+    }
+
+    fun openNewTab() {
+        persistAttached()
+        tabs = TabListReducer.openTab(tabs, HOME_URL)
+        // A brand-new tab has no parked state, so this loads HOME_URL fresh.
+        bindTabToWebView(tabs.activeId)
+    }
+
+    fun closeTab(id: Long) {
+        val wasActive = id == tabs.activeId
+        tabs = TabListReducer.closeTab(tabs, id, HOME_URL)
+        savedStates.remove(id)
+        if (wasActive) bindTabToWebView(tabs.activeId)
+    }
+
     fun load(text: String) {
         val url = UrlNormalizer.normalize(text) ?: return
         address = url
+        tabs = TabListReducer.updateTab(tabs, attachedTabId, url = url)
         webView?.loadUrl(url)
     }
 
     BackHandler(enabled = canBack) { webView?.goBack() }
 
     Column(Modifier.fillMaxSize()) {
+        // Tab strip.
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            tabs.tabs.forEach { tab ->
+                FilterChip(
+                    selected = tab.id == tabs.activeId,
+                    onClick = { switchTo(tab.id) },
+                    label = { Text(tabLabel(tab.title, tab.url), maxLines = 1) },
+                    trailingIcon = {
+                        TextButton(
+                            onClick = { closeTab(tab.id) },
+                            contentPadding = PaddingValues(0.dp),
+                        ) { Text("×") }
+                    },
+                )
+            }
+            TextButton(onClick = { openNewTab() }) { Text("+") }
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -143,15 +223,19 @@ fun BrowserScreen(onExit: () -> Unit) {
                             canBack = back
                             canForward = forward
                             loadingPage = loading
-                            if (url != null) address = url
+                            if (url != null) {
+                                address = url
+                                tabs = TabListReducer.updateTab(tabs, attachedTabId, url = url)
+                            }
                         },
                     )
                     webChromeClient = BrowserWebChromeClient(
                         onProgress = { progress = it },
-                        onTitle = { /* title used by tabs later */ },
+                        onTitle = { title -> tabs = TabListReducer.updateTab(tabs, attachedTabId, title = title) },
                     )
 
-                    // Install the active profile's environment before any page script runs.
+                    // Install the active profile's environment before any page script runs. This is a
+                    // WebView-wide document-start hook, so it applies to every tab loaded here.
                     if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                         val script = EnvBundleCompiler.compileFromAssets(ctx, activeProfile)
                         WebViewCompat.addDocumentStartJavaScript(this, script, setOf("*"))
@@ -162,4 +246,11 @@ fun BrowserScreen(onExit: () -> Unit) {
             },
         )
     }
+}
+
+/** Short, human-friendly tab label: the page title if present, else the url host. */
+private fun tabLabel(title: String, url: String): String {
+    if (title.isNotBlank()) return title.take(24)
+    val host = url.substringAfter("://", url).substringBefore('/').removePrefix("www.")
+    return host.ifBlank { url }.take(24)
 }
