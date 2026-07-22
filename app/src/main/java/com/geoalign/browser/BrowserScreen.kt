@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -335,6 +336,11 @@ fun BrowserScreen(onExit: () -> Unit) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
+                // On debuggable (sideload) builds, allow chrome://inspect so WebView-hostile sites
+                // can be diagnosed live. No-op on release.
+                if (ctx.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+                    WebView.setWebContentsDebuggingEnabled(true)
+                }
                 WebView(ctx).apply {
                     settings.apply {
                         javaScriptEnabled = true

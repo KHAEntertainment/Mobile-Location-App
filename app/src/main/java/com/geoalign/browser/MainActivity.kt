@@ -1,6 +1,7 @@
 package com.geoalign.browser
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.os.Bundle
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
@@ -16,13 +17,16 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -31,38 +35,52 @@ import com.geoalign.web.policy.LocalNetworkInterceptor
 import android.util.Log
 import org.json.JSONArray
 
+/**
+ * App entry point. Home is the readiness dashboard (spec §25); the POC diagnostics WebView is
+ * reachable from it via "Open diagnostics" so the on-device environment can still be verified.
+ */
 private enum class Screen { Dashboard, Diagnostics, Editor, Browser }
 
-/**
- * App entry point. Home is the readiness dashboard (spec §25); the POC diagnostics WebView and the
- * profile editor are reachable from it.
- */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    // targetSdk 35 forces edge-to-edge; pad for status bar, nav bar, and cutout so
-                    // content isn't hidden under the notch/system bars.
-                    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
-                    var screen by remember { mutableStateOf(Screen.Dashboard) }
-                    when (screen) {
-                        Screen.Diagnostics -> Column(Modifier.fillMaxSize()) {
-                            OutlinedButton(
-                                onClick = { screen = Screen.Dashboard },
-                                modifier = Modifier.padding(8.dp),
-                            ) { Text("← Back to readiness") }
-                            PocWebView(Modifier.fillMaxSize())
-                        }
-                        Screen.Editor -> ProfileEditor(onDone = { screen = Screen.Dashboard })
-                        Screen.Browser -> BrowserScreen(onExit = { screen = Screen.Dashboard })
-                        Screen.Dashboard -> ReadinessDashboard(
-                            onOpenDiagnostics = { screen = Screen.Diagnostics },
-                            onEditProfile = { screen = Screen.Editor },
-                            onOpenBrowser = { screen = Screen.Browser },
-                        )
+                // Tint the system-bar strips so the status-bar clock/notifications and the nav bar
+                // are readable (they sit on a colored band, with light icons) instead of white-on-white.
+                val barColor = MaterialTheme.colorScheme.primary
+                val view = LocalView.current
+                if (!view.isInEditMode) {
+                    SideEffect {
+                        val window = (view.context as Activity).window
+                        val controller = WindowCompat.getInsetsController(window, view)
+                        controller.isAppearanceLightStatusBars = false
+                        controller.isAppearanceLightNavigationBars = false
                     }
+                }
+                // Outer surface fills behind the system bars (edge-to-edge) and provides the bar color;
+                // the inner surface is inset to the safe area and hosts the app content.
+                Surface(modifier = Modifier.fillMaxSize(), color = barColor) {
+                    Surface(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
+                        Box(Modifier.fillMaxSize()) {
+                            var screen by remember { mutableStateOf(Screen.Dashboard) }
+                            when (screen) {
+                                Screen.Diagnostics -> Column(Modifier.fillMaxSize()) {
+                                    OutlinedButton(
+                                        onClick = { screen = Screen.Dashboard },
+                                        modifier = Modifier.padding(8.dp),
+                                    ) { Text("← Back to readiness") }
+                                    PocWebView(Modifier.fillMaxSize())
+                                }
+                                Screen.Editor -> ProfileEditor(onDone = { screen = Screen.Dashboard })
+                                Screen.Browser -> BrowserScreen(onExit = { screen = Screen.Dashboard })
+                                Screen.Dashboard -> ReadinessDashboard(
+                                    onOpenDiagnostics = { screen = Screen.Diagnostics },
+                                    onEditProfile = { screen = Screen.Editor },
+                                    onOpenBrowser = { screen = Screen.Browser },
+                                )
+                            }
+                        }
                     }
                 }
             }
