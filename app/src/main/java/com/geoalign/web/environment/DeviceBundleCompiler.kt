@@ -12,17 +12,31 @@ object DeviceBundleCompiler {
 
     /** Pure substitution of device values into the JS template. */
     fun compile(template: String, profile: DeviceProfile): String = template
-        .replace("__NAV_PLATFORM__", jsEscape(profile.navPlatform))
-        .replace("__MAXTOUCH__", profile.maxTouchPoints.toString())
-        .replace("__DPR__", profile.devicePixelRatio.toString())
-        .replace("__SCREEN_W__", profile.screenWidth.toString())
-        .replace("__SCREEN_H__", profile.screenHeight.toString())
+        .replace("__GEO_BLOCK__", geometryBlock(profile))
         .replace("__UAD_BLOCK__", userAgentDataBlock(profile))
 
     /** Load the bundled template and compile it for [profile]. */
     fun compileFromAssets(context: Context, profile: DeviceProfile): String {
         val template = context.assets.open("device_bundle.js").bufferedReader().use { it.readText() }
         return compile(template, profile)
+    }
+
+    /**
+     * The geometry section: navigator.platform, touch points, devicePixelRatio and screen size.
+     * Emitted only for spoof presets — "This device" ([DeviceProfile.native]) keeps the real values
+     * so the page sees genuine, self-consistent hardware.
+     */
+    internal fun geometryBlock(profile: DeviceProfile): String {
+        if (profile.native) return ""
+        return buildString {
+            append("def(navigator, \"platform\", ").append(jsQuote(profile.navPlatform)).append(");")
+            append("def(navigator, \"maxTouchPoints\", ").append(profile.maxTouchPoints).append(");")
+            append("def(window, \"devicePixelRatio\", ").append(profile.devicePixelRatio).append(");")
+            append("def(screen, \"width\", ").append(profile.screenWidth).append(");")
+            append("def(screen, \"height\", ").append(profile.screenHeight).append(");")
+            append("def(screen, \"availWidth\", ").append(profile.screenWidth).append(");")
+            append("def(screen, \"availHeight\", ").append(profile.screenHeight).append(");")
+        }
     }
 
     /**

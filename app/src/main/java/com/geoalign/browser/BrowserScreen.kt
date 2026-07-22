@@ -82,6 +82,9 @@ fun BrowserScreen(onExit: () -> Unit) {
     val context = LocalContext.current
     val store = remember { AppGraph.profileStore(context) }
     val scope = rememberCoroutineScope()
+    // The real WebView UA, captured once. "This device" mode serves a cleaned (de-WebView-ified)
+    // version so pages see a genuine Chrome rather than an embedded WebView.
+    val deviceUa = remember { android.webkit.WebSettings.getDefaultUserAgent(context) }
 
     var profile by remember { mutableStateOf<LocationProfile?>(null) }
     var loaded by remember { mutableStateOf(false) }
@@ -174,6 +177,9 @@ fun BrowserScreen(onExit: () -> Unit) {
         webView?.loadUrl(url)
     }
 
+    // The UA a device should present: a preset's spoofed UA, or the cleaned real UA for "This device".
+    fun uaFor(d: DeviceProfile): String = if (d.native) deWebViewify(deviceUa) else d.userAgent
+
     // Switch the emulated device live: swap the UA string, re-inject the device bundle, reload, and
     // persist the choice back to the active profile so it sticks next session.
     fun changeDevice(newDevice: DeviceProfile) {
@@ -181,7 +187,7 @@ fun BrowserScreen(onExit: () -> Unit) {
         if (newDevice.id == device.id) return
         device = newDevice
         webView?.let { wv ->
-            wv.settings.userAgentString = newDevice.userAgent
+            wv.settings.userAgentString = uaFor(newDevice)
             if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                 deviceScript?.remove()
                 deviceScript = WebViewCompat.addDocumentStartJavaScript(
@@ -352,8 +358,8 @@ fun BrowserScreen(onExit: () -> Unit) {
                         @Suppress("DEPRECATION")
                         allowUniversalAccessFromFileURLs = false
                         mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                        // Present the emulated device's UA from the very first request.
-                        userAgentString = device.userAgent
+                        // Present the active device's UA from the very first request.
+                        userAgentString = uaFor(device)
                     }
                     if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) {
                         WebSettingsCompat.setSafeBrowsingEnabled(settings, true)
@@ -402,6 +408,16 @@ fun BrowserScreen(onExit: () -> Unit) {
         )
     }
 }
+
+/**
+ * Turn the default WebView UA into a Chrome-like one: drop the "; wv" embedded-WebView marker, the
+ * "Version/4.0 " WebView token, and the internal "Build/…" fingerprint. The result reads as mobile
+ * Chrome, which sites like Tinder accept where an embedded-WebView UA is refused.
+ */
+private fun deWebViewify(ua: String): String = ua
+    .replace("; wv)", ")")
+    .replace(Regex(" Build/[A-Za-z0-9._-]+"), "")
+    .replace("Version/4.0 ", "")
 
 /** Launch a safe external scheme (tel:, mailto:, geo:, …) through the system, ignoring failures. */
 private fun openExternally(context: Context, url: String) {

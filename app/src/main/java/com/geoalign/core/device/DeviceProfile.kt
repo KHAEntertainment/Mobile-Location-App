@@ -46,6 +46,13 @@ data class DeviceProfile(
      * hides `userAgentData` to match real Safari.
      */
     val emitsClientHints: Boolean,
+    /**
+     * "This device" mode: present the real hardware (no screen/DPR/touch overrides) with a clean
+     * Chrome user-agent, rather than spoofing a specific device. Most compatible with sites that
+     * refuse inconsistent/embedded-WebView fingerprints (spec §14). The Android layer supplies the
+     * real UA (de-WebView-ified); [userAgent] is unused for native profiles.
+     */
+    val native: Boolean = false,
 )
 
 object DeviceProfiles {
@@ -54,6 +61,33 @@ object DeviceProfiles {
         Brand("Not/A)Brand", "8", "8.0.0.0"),
         Brand("Chromium", "126", "126.0.6478.0"),
         Brand("Google Chrome", "126", "126.0.6478.0"),
+    )
+
+    /**
+     * Default, most-compatible mode: present the real device. No geometry overrides; the browser
+     * supplies a cleaned Chrome UA and Chrome client-hints so the page sees a genuine mobile Chrome
+     * rather than an embedded WebView.
+     */
+    val NATIVE = DeviceProfile(
+        id = "native",
+        displayName = "This device (recommended)",
+        deviceClass = DeviceClass.ANDROID,
+        userAgent = "", // supplied at runtime from the real WebView UA
+        mobile = true,
+        navPlatform = "Linux armv8l",
+        uachPlatform = "Android",
+        platformVersion = "14.0.0",
+        architecture = "",
+        bitness = "",
+        model = "",
+        browserFullVersion = "126.0.6478.0",
+        brands = chrome,
+        screenWidth = 0,
+        screenHeight = 0,
+        devicePixelRatio = 0.0,
+        maxTouchPoints = 0,
+        emitsClientHints = true,
+        native = true,
     )
 
     val DESKTOP_MAC_CHROME = DeviceProfile(
@@ -188,9 +222,9 @@ object DeviceProfiles {
         emitsClientHints = true,
     )
 
-    /** Presentation order for the picker: mobiles first (most common), then desktops. */
+    /** Presentation order for the picker: native first (recommended), then spoof presets. */
     val ALL: List<DeviceProfile> = listOf(
-        PIXEL_8, GALAXY_S24, IPHONE_15_PRO, IPHONE_SE, DESKTOP_MAC_CHROME, DESKTOP_WIN_CHROME,
+        NATIVE, PIXEL_8, GALAXY_S24, IPHONE_15_PRO, IPHONE_SE, DESKTOP_MAC_CHROME, DESKTOP_WIN_CHROME,
     )
 
     val DEFAULT_MOBILE: DeviceProfile = PIXEL_8
@@ -200,9 +234,10 @@ object DeviceProfiles {
 
     /**
      * Resolve the device a location profile should present. Explicit [LocationProfile.userAgentProfileId]
-     * wins; otherwise the legacy [LocationProfile.desktopMode] toggle picks desktop vs mobile.
+     * wins; otherwise the legacy [LocationProfile.desktopMode] toggle picks desktop, and the default
+     * is the most-compatible [NATIVE] mode.
      */
     fun forProfile(profile: LocationProfile): DeviceProfile =
         byId(profile.userAgentProfileId)
-            ?: if (profile.desktopMode) DEFAULT_DESKTOP else DEFAULT_MOBILE
+            ?: if (profile.desktopMode) DEFAULT_DESKTOP else NATIVE
 }

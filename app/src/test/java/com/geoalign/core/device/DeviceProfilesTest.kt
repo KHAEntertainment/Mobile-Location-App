@@ -26,8 +26,15 @@ class DeviceProfilesTest {
         assertEquals(ids.size, ids.toSet().size)
     }
 
-    @Test fun everyPresetHasNonBlankUserAgent() {
-        assertTrue(DeviceProfiles.ALL.all { it.userAgent.isNotBlank() })
+    @Test fun everySpoofPresetHasNonBlankUserAgent() {
+        // Native mode supplies its UA at runtime, so its userAgent field is intentionally blank.
+        assertTrue(DeviceProfiles.ALL.filter { !it.native }.all { it.userAgent.isNotBlank() })
+    }
+
+    @Test fun nativeIsFirstAndDefault() {
+        assertSame(DeviceProfiles.NATIVE, DeviceProfiles.ALL.first())
+        assertTrue(DeviceProfiles.NATIVE.native)
+        assertSame(DeviceProfiles.NATIVE, DeviceProfiles.forProfile(baseProfile()))
     }
 
     @Test fun mobileFlagMatchesDeviceClass() {
@@ -66,12 +73,12 @@ class DeviceProfilesTest {
         val desktop = DeviceProfiles.forProfile(baseProfile(userAgentProfileId = "bogus", desktopMode = true))
         assertSame(DeviceProfiles.DEFAULT_DESKTOP, desktop)
         val mobile = DeviceProfiles.forProfile(baseProfile(userAgentProfileId = "bogus", desktopMode = false))
-        assertSame(DeviceProfiles.DEFAULT_MOBILE, mobile)
+        assertSame(DeviceProfiles.NATIVE, mobile)
     }
 
     @Test fun forProfileHonorsDesktopToggleWhenNoId() {
         assertSame(DeviceProfiles.DEFAULT_DESKTOP, DeviceProfiles.forProfile(baseProfile(desktopMode = true)))
-        assertSame(DeviceProfiles.DEFAULT_MOBILE, DeviceProfiles.forProfile(baseProfile(desktopMode = false)))
+        assertSame(DeviceProfiles.NATIVE, DeviceProfiles.forProfile(baseProfile(desktopMode = false)))
     }
 
     @Test fun desktopPresetsAreNonTouch() {
