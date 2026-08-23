@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Play edition keeps the plain product name. Flavor resources override the same-named
+         resource in src/main. -->
+    <string name="app_name">GeoAlign Browser</string>
+</resources>

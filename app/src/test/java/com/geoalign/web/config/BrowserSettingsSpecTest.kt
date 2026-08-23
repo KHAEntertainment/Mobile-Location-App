@@ -13,6 +13,11 @@ import org.junit.Test
  *
  * [WEBVIEW_UA] is a real capture from a Galaxy Z Fold 6 (SM-F956U1, Android 16, WebView 151), the
  * same fixture `NativeIdentityTest` uses.
+ *
+ * The two catalog-wide tests below iterate `DeviceProfiles.ALL`, so under `play` they cover just
+ * "This device" and under `community` the whole preset set. The assertion that a *spoof preset*
+ * presents its own UA moved to `src/testCommunity/.../CommunityBrowserSettingsSpecTest.kt`: under
+ * `play` there is no such preset to select (issue #4), so it cannot be written here.
  */
 class BrowserSettingsSpecTest {
 
@@ -69,14 +74,6 @@ class BrowserSettingsSpecTest {
         assertFalse("WebView marker must not survive", ua.contains("wv"))
         assertFalse("WebView Version token must not survive", ua.contains("Version/4.0"))
         assertFalse("build fingerprint must not survive", ua.contains("Build/"))
-    }
-
-    @Test
-    fun `a spoof preset presents its own UA and never consults the real one`() {
-        val preset = DeviceProfiles.ALL.first { !it.native }
-        val spec = BrowserSettingsSpec.hardened(preset, WEBVIEW_UA)
-        assertEquals(preset.userAgent, spec.userAgentString)
-        assertFalse("the real device must not leak through a preset", spec.userAgentString.contains("SM-F956U1"))
     }
 
     @Test

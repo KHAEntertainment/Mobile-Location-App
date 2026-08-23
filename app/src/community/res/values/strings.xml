@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Both editions can be installed at once (community carries the .community applicationId
+         suffix), so they must be distinguishable in the launcher and in Settings > Apps. Without a
+         distinct label the only way to tell which one you are uninstalling is the package name. -->
+    <string name="app_name">GeoAlign Community</string>
+</resources>

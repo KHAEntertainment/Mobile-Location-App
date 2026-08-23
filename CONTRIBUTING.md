@@ -60,24 +60,32 @@ default JDK alone and point Gradle at 21 per invocation — that is what the pro
 
 ```bash
 # Unit tests — no device or emulator needed. Required before every PR.
-./gradlew testDebugUnitTest
+# The build has two product flavors (§5, README `## Editions`), so there is no unflavored
+# `testDebugUnitTest`: both editions have to be run, because they compile different source sets.
+./gradlew testPlayDebugUnitTest testCommunityDebugUnitTest
 
 # Static analysis
-./gradlew lintDebug
+./gradlew lintPlayDebug lintCommunityDebug
 
-# Debug APK -> app/build/outputs/apk/debug/app-debug.apk
-./gradlew assembleDebug
+# Debug APKs -> app/build/outputs/apk/<flavor>/debug/app-<flavor>-debug.apk
+./gradlew assemblePlayDebug assembleCommunityDebug
 ```
 
-**`./gradlew testDebugUnitTest` must pass before you open a pull request.** No exceptions. It runs
-entirely on the JVM, needs no hardware, and takes well under a minute. If your change is
-documentation-only, run it anyway as a smoke check — an unexpected failure there means something
+**Both flavors' unit tests must pass before you open a pull request.** No exceptions. They run
+entirely on the JVM, need no hardware, and take well under a minute. If your change is
+documentation-only, run them anyway as a smoke check — an unexpected failure there means something
 other than your change is wrong, and that is worth knowing before review.
+
+Running only one flavor is not enough even for a change that looks edition-neutral: `play` is built
+without `core/device/ExperimentalDeviceProfiles.kt` altogether, so a reference to a spoof preset
+from shared code compiles cleanly under `community` and fails only under `play`.
 
 The full local green gate is:
 
 ```bash
-./gradlew testDebugUnitTest lintDebug assembleDebug
+./gradlew testPlayDebugUnitTest testCommunityDebugUnitTest \
+          lintPlayDebug lintCommunityDebug \
+          assemblePlayDebug assembleCommunityDebug
 ```
 
 Installing over a CI-built APK fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` because CI and local
@@ -166,7 +174,14 @@ Also:
 - **Capability facts are produced once and shared.** No surface re-queries `WebViewFeature` on its
   own.
 - **Distribution differences flow through an injected `DistributionCapabilities`**, never
-  `if (BuildConfig.FLAVOR)` at a call site.
+  `if (BuildConfig.FLAVOR)` at a call site. Get it from `AppGraph.distributionCapabilities()`; a
+  flavor string compared at the point of use cannot be exercised both ways by a JVM test and
+  scatters the edition policy across every screen that happens to care.
+- **When an edition must not *contain* something, put it in a flavor source set.** A capability flag
+  makes a feature inert, not absent — the code and its strings are still in the APK. `src/play` and
+  `src/community` each supply a `DeviceProfileCatalog` under the same fully-qualified name, and
+  `ExperimentalDeviceProfiles.kt` exists only in `src/community`, so the Play artifact has no spoof
+  presets to hide. `testPlayDebugUnitTest` scans the variant's bytecode to keep it that way.
 - **minSdk is 26.** Do not use an API above it without a guarded fallback.
 - **Permissions are `INTERNET` and `ACCESS_NETWORK_STATE`, and that is the whole list.** Location,
   camera, microphone, wifi-state, and bluetooth permissions are explicitly removed in the manifest.
@@ -182,7 +197,7 @@ Also:
    `feature/1-license-and-contribution`.
 3. Ship **small reviewable slices, each green before you proceed**. A large PR that has to be
    reviewed as one lump is harder to accept than three that each stand alone.
-4. Run `./gradlew testDebugUnitTest` (§3).
+4. Run `./gradlew testPlayDebugUnitTest testCommunityDebugUnitTest` (§3) — both, not one.
 5. Open a PR whose body contains `Closes #<issue>`, describes the change, and — where the issue
    listed acceptance criteria — walks through each one with real evidence.
 
@@ -193,8 +208,9 @@ wrong; a measurement beats a story every time.
 **Commits:** imperative subject, and explain *why* in the body when the change is not self-evident.
 The existing `git log` is a readable milestone spine — keep it that way.
 
-**CI** runs unit tests, lint, and `assembleDebug` on `main` and on every `feature/**` branch. Treat
-edits to `.github/workflows/` as high-care.
+**CI** runs unit tests, lint, and the debug APK build on `main` and on every `feature/**` branch,
+once per edition as a two-leg matrix (`play`, `community`). Treat edits to `.github/workflows/` as
+high-care.
 
 ## 7. Documentation changes
 

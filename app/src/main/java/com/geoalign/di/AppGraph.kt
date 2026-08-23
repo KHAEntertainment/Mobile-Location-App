@@ -1,6 +1,7 @@
 package com.geoalign.di
 
 import android.content.Context
+import com.geoalign.core.distribution.DistributionCapabilities
 import com.geoalign.data.geolocation.IpWhoIsProvider
 import com.geoalign.data.monitor.AlignmentMonitor
 import com.geoalign.data.net.OkHttpEffectiveIpRepository
@@ -11,6 +12,7 @@ import com.geoalign.data.settings.AndroidKeystoreSecureKeyStore
 import com.geoalign.data.settings.SecureKeyStore
 import com.geoalign.data.vpn.AndroidVpnStatusRepository
 import com.geoalign.data.vpn.VpnStatusRepository
+import com.geoalign.distribution.BuildDistribution
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -60,4 +62,11 @@ object AppGraph {
 
     fun secureKeyStore(context: Context): SecureKeyStore =
         AndroidKeystoreSecureKeyStore(context)
+
+    /**
+     * What this edition of the app is allowed to do. Resolved from the flavor-supplied
+     * `BuildDistribution`, so call sites read a value instead of comparing `BuildConfig.FLAVOR`
+     * (`CONTRIBUTING.md` §5). No context needed — it is a compile-time constant of the variant.
+     */
+    fun distributionCapabilities(): DistributionCapabilities = BuildDistribution.CAPABILITIES
 }

@@ -13,6 +13,12 @@ import com.geoalign.core.model.LocationProfile
  * Honesty note (spec §1): emulating a device changes what pages *see*, not what the hardware *is*.
  * It is a consistency tool, not an anonymity guarantee, and some surfaces (e.g. Sec-CH-UA request
  * headers on non-Chromium presets) remain imperfect.
+ *
+ * **Distribution split (issue #4).** Only [DeviceProfiles.NATIVE] lives here. The experimental spoof
+ * presets are declared in `ExperimentalDeviceProfiles`, which exists **only in the `community`
+ * source set** — the `play` variant is not compiled with that file at all, so it has no preset
+ * bytecode to hide. Both flavors supply a `DeviceProfileCatalog` with the same fully-qualified name;
+ * `play`'s is empty. See `core/distribution/DistributionCapabilities.kt`.
  */
 
 enum class DeviceClass { DESKTOP, IOS, ANDROID }
@@ -55,18 +61,33 @@ data class DeviceProfile(
     val native: Boolean = false,
 )
 
-object DeviceProfiles {
-
-    private val chrome = listOf(
+/**
+ * Shared UA Client-Hints brand lists. Deliberately a standalone object rather than a member of
+ * [DeviceProfiles]: the flavor-supplied catalog reads it while [DeviceProfiles] is still
+ * initialising its own `ALL`, and routing that through [DeviceProfiles] would make the two objects
+ * mutually dependent at class-init time.
+ */
+internal object UaBrands {
+    val CHROME_126 = listOf(
         Brand("Not/A)Brand", "8", "8.0.0.0"),
         Brand("Chromium", "126", "126.0.6478.0"),
         Brand("Google Chrome", "126", "126.0.6478.0"),
     )
+}
+
+/**
+ * The device catalog as the rest of the app sees it. Shape is fixed in `main` so call sites never
+ * need to know which edition they are running in; the *contents* beyond [NATIVE] come from the
+ * flavor-supplied `DeviceProfileCatalog`.
+ */
+object DeviceProfiles {
 
     /**
      * Default, most-compatible mode: present the real device. No geometry overrides; the browser
      * supplies a cleaned Chrome UA and Chrome client-hints so the page sees a genuine mobile Chrome
      * rather than an embedded WebView.
+     *
+     * This is the one profile present in **every** edition, and on `play` it is the only one.
      */
     val NATIVE = DeviceProfile(
         id = "native",
@@ -81,7 +102,7 @@ object DeviceProfiles {
         bitness = "",
         model = "",
         browserFullVersion = "126.0.6478.0",
-        brands = chrome,
+        brands = UaBrands.CHROME_126,
         screenWidth = 0,
         screenHeight = 0,
         devicePixelRatio = 0.0,
@@ -90,145 +111,19 @@ object DeviceProfiles {
         native = true,
     )
 
-    val DESKTOP_MAC_CHROME = DeviceProfile(
-        id = "desktop_mac_chrome",
-        displayName = "Desktop — Chrome (macOS)",
-        deviceClass = DeviceClass.DESKTOP,
-        userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-        mobile = false,
-        navPlatform = "MacIntel",
-        uachPlatform = "macOS",
-        platformVersion = "14.5.0",
-        architecture = "arm",
-        bitness = "64",
-        model = "",
-        browserFullVersion = "126.0.6478.0",
-        brands = chrome,
-        screenWidth = 1512,
-        screenHeight = 982,
-        devicePixelRatio = 2.0,
-        maxTouchPoints = 0,
-        emitsClientHints = true,
-    )
+    /**
+     * Presentation order for the picker: native first (recommended), then whatever spoof presets
+     * this edition was built with. On `play` that tail is empty, because the presets are not in the
+     * source set — not because they were filtered out here.
+     */
+    val ALL: List<DeviceProfile> = listOf(NATIVE) + DeviceProfileCatalog.EXPERIMENTAL
 
-    val DESKTOP_WIN_CHROME = DeviceProfile(
-        id = "desktop_win_chrome",
-        displayName = "Desktop — Chrome (Windows)",
-        deviceClass = DeviceClass.DESKTOP,
-        userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-        mobile = false,
-        navPlatform = "Win32",
-        uachPlatform = "Windows",
-        platformVersion = "15.0.0",
-        architecture = "x86",
-        bitness = "64",
-        model = "",
-        browserFullVersion = "126.0.6478.0",
-        brands = chrome,
-        screenWidth = 1920,
-        screenHeight = 1080,
-        devicePixelRatio = 1.0,
-        maxTouchPoints = 0,
-        emitsClientHints = true,
-    )
-
-    val IPHONE_15_PRO = DeviceProfile(
-        id = "iphone_15_pro",
-        displayName = "iPhone 15 Pro (Safari)",
-        deviceClass = DeviceClass.IOS,
-        userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) " +
-            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
-        mobile = true,
-        navPlatform = "iPhone",
-        uachPlatform = "iOS",
-        platformVersion = "17.5.0",
-        architecture = "",
-        bitness = "",
-        model = "iPhone",
-        browserFullVersion = "17.5",
-        brands = emptyList(),
-        screenWidth = 393,
-        screenHeight = 852,
-        devicePixelRatio = 3.0,
-        maxTouchPoints = 5,
-        emitsClientHints = false,
-    )
-
-    val IPHONE_SE = DeviceProfile(
-        id = "iphone_se",
-        displayName = "iPhone SE (Safari)",
-        deviceClass = DeviceClass.IOS,
-        userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) " +
-            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
-        mobile = true,
-        navPlatform = "iPhone",
-        uachPlatform = "iOS",
-        platformVersion = "17.5.0",
-        architecture = "",
-        bitness = "",
-        model = "iPhone",
-        browserFullVersion = "17.5",
-        brands = emptyList(),
-        screenWidth = 375,
-        screenHeight = 667,
-        devicePixelRatio = 2.0,
-        maxTouchPoints = 5,
-        emitsClientHints = false,
-    )
-
-    val PIXEL_8 = DeviceProfile(
-        id = "pixel_8",
-        displayName = "Pixel 8 (Chrome)",
-        deviceClass = DeviceClass.ANDROID,
-        userAgent = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36",
-        mobile = true,
-        navPlatform = "Linux armv8l",
-        uachPlatform = "Android",
-        platformVersion = "14.0.0",
-        architecture = "",
-        bitness = "",
-        model = "Pixel 8",
-        browserFullVersion = "126.0.6478.0",
-        brands = chrome,
-        screenWidth = 412,
-        screenHeight = 915,
-        devicePixelRatio = 2.625,
-        maxTouchPoints = 5,
-        emitsClientHints = true,
-    )
-
-    val GALAXY_S24 = DeviceProfile(
-        id = "galaxy_s24",
-        displayName = "Galaxy S24 (Chrome)",
-        deviceClass = DeviceClass.ANDROID,
-        userAgent = "Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36",
-        mobile = true,
-        navPlatform = "Linux armv8l",
-        uachPlatform = "Android",
-        platformVersion = "14.0.0",
-        architecture = "",
-        bitness = "",
-        model = "SM-S921B",
-        browserFullVersion = "126.0.6478.0",
-        brands = chrome,
-        screenWidth = 360,
-        screenHeight = 780,
-        devicePixelRatio = 3.0,
-        maxTouchPoints = 5,
-        emitsClientHints = true,
-    )
-
-    /** Presentation order for the picker: native first (recommended), then spoof presets. */
-    val ALL: List<DeviceProfile> = listOf(
-        NATIVE, PIXEL_8, GALAXY_S24, IPHONE_15_PRO, IPHONE_SE, DESKTOP_MAC_CHROME, DESKTOP_WIN_CHROME,
-    )
-
-    val DEFAULT_MOBILE: DeviceProfile = PIXEL_8
-    val DEFAULT_DESKTOP: DeviceProfile = DESKTOP_MAC_CHROME
+    /**
+     * Fallbacks for the legacy `desktopMode` toggle. An edition without spoof presets has no
+     * desktop or non-native mobile preset to fall back to, so both resolve to [NATIVE].
+     */
+    val DEFAULT_MOBILE: DeviceProfile = DeviceProfileCatalog.DEFAULT_MOBILE ?: NATIVE
+    val DEFAULT_DESKTOP: DeviceProfile = DeviceProfileCatalog.DEFAULT_DESKTOP ?: NATIVE
 
     fun byId(id: String?): DeviceProfile? = ALL.firstOrNull { it.id == id }
 
@@ -236,6 +131,10 @@ object DeviceProfiles {
      * Resolve the device a location profile should present. Explicit [LocationProfile.userAgentProfileId]
      * wins; otherwise the legacy [LocationProfile.desktopMode] toggle picks desktop, and the default
      * is the most-compatible [NATIVE] mode.
+     *
+     * A profile created on `community` and carried to `play` (same JSON store, different edition)
+     * names a preset id that this edition does not have; [byId] misses and it degrades to [NATIVE]
+     * rather than crashing.
      */
     fun forProfile(profile: LocationProfile): DeviceProfile =
         byId(profile.userAgentProfileId)
