@@ -27,7 +27,8 @@ Milestones 1–3 are implemented and validated on-device. This tree contains:
   drifted or stale profile can no longer read as ready.
 - GitHub Actions CI: unit tests → lint → debug APK.
 
-**191 unit tests, 0 failures.** Build and iterate locally — see
+The unit suite is all-JVM and runs per edition in CI on every push, both green. Counts move with
+every merge, so read them from a workflow run rather than from here. Build and iterate locally — see
 [`docs/HANDOFF.md`](docs/HANDOFF.md) §6 for the toolchain, and
 [`docs/TROUBLESHOOTING_WEBVIEW.md`](docs/TROUBLESHOOTING_WEBVIEW.md) for diagnosing the WebView.
 
