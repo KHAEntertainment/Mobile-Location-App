@@ -34,6 +34,14 @@ class BrowserWebViewClient(
     /** The renderer process died. Must produce a recovery experience, not a blank view. */
     private val onRendererGone: (didCrash: Boolean) -> Unit = {},
     /**
+     * Offers an in-page link to the alignment navigation hold (issue #6). Returns true when it was
+     * queued instead of followed, which is consumed here so the WebView does not navigate.
+     *
+     * Defaults to "never held" so a caller that does not wire it gets ordinary browsing rather than
+     * a silently frozen one. The decision itself is `BrowserSessionController`'s; this only asks.
+     */
+    private val onHoldNavigation: (url: String) -> Boolean = { false },
+    /**
      * `WebResourceErrorCompat.getDescription` is available on the installed WebView, from the one
      * capability probe. Defaults false so a caller that does not pass it gets the safe answer rather
      * than a description this WebView cannot produce.
@@ -64,7 +72,9 @@ class BrowserWebViewClient(
                     onBlocked(uri.toString(), result.reason)
                     true // consume — do not navigate to a private destination
                 } else {
-                    false // let WebView load http(s) itself
+                    // Asked *after* the local-network policy: a blocked private destination is
+                    // refused outright and must never be queued for later.
+                    onHoldNavigation(uri.toString()) // true consumes and queues; false loads now
                 }
             }
             ExternalSchemePolicy.Action.OPEN_EXTERNALLY -> {

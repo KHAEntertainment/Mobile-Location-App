@@ -42,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -56,6 +57,9 @@ import com.geoalign.core.device.DeviceProfile
 import com.geoalign.core.device.DeviceProfiles
 import com.geoalign.core.model.LocationProfile
 import com.geoalign.di.AppGraph
+import com.geoalign.ui.components.AlignmentIndicator
+import com.geoalign.ui.components.AlignmentRecoveryPanel
+import com.geoalign.ui.components.AlignmentWarningBanner
 import com.geoalign.web.config.AndroidWebViewCapabilityProbe
 import com.geoalign.web.config.AndroidWebViewUpdateLauncher
 import com.geoalign.web.config.WebViewConfigurator
@@ -88,6 +92,11 @@ fun BrowserScreen(onExit: () -> Unit) {
             store = AppGraph.profileStore(context),
             downloadEnqueuer = AndroidDownloadEnqueuer(context),
             homeUrl = HOME_URL,
+            // The application-scoped singleton, already started. Taking a per-screen instance would
+            // re-register the network callback on every navigation and forget the verified exit
+            // address that is how an exit change becomes visible at all.
+            monitor = AppGraph.alignmentMonitor(context),
+            readiness = AppGraph.readinessService(context),
         ),
     )
     // The real WebView UA, captured once. "This device" mode serves a cleaned (de-WebView-ified)
@@ -109,6 +118,9 @@ fun BrowserScreen(onExit: () -> Unit) {
 
     val profileState by vm.profileState.collectAsState()
     val session by vm.session.collectAsState()
+    // Live alignment, already reduced to a description by `BrowserAlignmentPresenter`. This screen
+    // reads tone, label and buttons off it; it does not compute any of them.
+    val alignment by vm.alignment.collectAsState()
 
     if (!profileState.loaded) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -140,8 +152,31 @@ fun BrowserScreen(onExit: () -> Unit) {
     // The ladder — dismiss an overlay, then go back, then close a tab, then leave — is decided by
     // `BackPolicy` and unit-tested; only the last rung is ours, because only this screen knows what
     // leaving means.
+    // While the recovery prompt is up, Back maps to the choice the user could already make there —
+    // "Leave the browser". It is not trapped (that would be hostile) and it does not fall through
+    // to the tab ladder, which would slide the prompt out of the way without answering it.
     BackHandler {
-        if (vm.onBack() == BackAction.LEAVE_BROWSER) onExit()
+        if (alignment.prompt != null) onExit()
+        else if (vm.onBack() == BackAction.LEAVE_BROWSER) onExit()
+    }
+
+    // The four choices, in a dialog *over* the live page rather than in place of it. The WebView
+    // stays in the composition, attached and rendering, so a half-filled form behind this is still
+    // there when the user picks one — the pause holds new navigation, it does not tear the session
+    // down. `onDismissRequest` is a no-op: leaving is one of the four buttons, and a tap-outside
+    // that silently resumed browsing would defeat the whole mechanism.
+    alignment.prompt?.let { prompt ->
+        AlertDialog(
+            onDismissRequest = {},
+            confirmButton = {},
+            text = {
+                AlignmentRecoveryPanel(
+                    prompt = prompt,
+                    errorMessage = alignment.rematchError,
+                    onAction = { action -> if (vm.onRecoveryAction(action)) onExit() },
+                )
+            },
+        )
     }
 
     if (showSiteInfo) {
@@ -226,6 +261,10 @@ fun BrowserScreen(onExit: () -> Unit) {
                 }
             }
 
+            // Persistent while browsing: it is in the chrome, not in a card that appears only when
+            // something is wrong, so "aligned" is as visible as "not aligned".
+            AlignmentIndicator(alignment, modifier = Modifier.padding(horizontal = 4.dp))
+
             TextButton(onClick = onExit) { Text("Done") }
         }
 
@@ -238,6 +277,23 @@ fun BrowserScreen(onExit: () -> Unit) {
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
             keyboardActions = KeyboardActions(onGo = { vm.load(session.address) }),
         )
+
+        // Standing, non-dismissible, and present for as long as the accepted risk is.
+        AlignmentWarningBanner(alignment)
+
+        // A navigation that was queued rather than performed. Says so explicitly, including that
+        // the current page was left alone, so a paused tap does not read as the app ignoring it.
+        alignment.heldNavigationNotice?.let { notice ->
+            Text(
+                text = notice,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .testTag("browser_alignment_held_notice"),
+            )
+        }
 
         session.sslWarning?.let { msg ->
             Card(
@@ -347,6 +403,10 @@ private fun BrowserWebView(
                         // Returns true from the callback itself; returning false would kill the app
                         // process instead of recovering.
                         onRendererGone = { didCrash -> vm.onRenderProcessGone(didCrash) },
+                        // In-page links go through the alignment hold too. Without this the pause
+                        // would cover only the address bar, and a tap on the page would navigate
+                        // straight past it.
+                        onHoldNavigation = { url -> vm.holdLinkNavigation(url) },
                         // From the single probe, not a WebViewFeature query of its own.
                         canReadErrorDescription = canReadErrorDescription,
                     )
