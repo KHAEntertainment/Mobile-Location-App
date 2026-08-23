@@ -4,9 +4,9 @@ import android.os.Build
 import android.webkit.WebSettings
 import androidx.webkit.UserAgentMetadata
 import androidx.webkit.WebSettingsCompat
-import androidx.webkit.WebViewFeature
 import com.geoalign.core.device.Brand
 import com.geoalign.core.device.NativeIdentity
+import com.geoalign.web.config.WebViewCapabilities
 
 /**
  * Applies "This device" mode's UA Client Hints to a WebView (spec §14).
@@ -19,6 +19,10 @@ import com.geoalign.core.device.NativeIdentity
  * The WebView's existing metadata is used as the base so the GREASE entry, major versions and the
  * mobile flag stay whatever the installed WebView build reports; only the brand name, full
  * versions, platform version and model are corrected. Pure derivation lives in [NativeIdentity].
+ *
+ * Support is passed in as [WebViewCapabilities] rather than asked of `WebViewFeature` here: the
+ * capability facts are probed once, so what this object did stays consistent with what the rest of
+ * the app reports about it.
  */
 object NativeUaMetadata {
 
@@ -33,19 +37,24 @@ object NativeUaMetadata {
      * Apply native-mode client hints when [native], otherwise restore whatever the WebView had
      * before native mode first touched it. Returns true if the settings were changed.
      */
-    fun applyOrRestore(settings: WebSettings, realUa: String, native: Boolean): Boolean {
-        if (!WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) return false
+    fun applyOrRestore(
+        settings: WebSettings,
+        realUa: String,
+        native: Boolean,
+        capabilities: WebViewCapabilities,
+    ): Boolean {
+        if (!capabilities.userAgentMetadata) return false
         if (!native) {
             val original = originals.remove(settings) ?: return false
             WebSettingsCompat.setUserAgentMetadata(settings, original)
             return true
         }
-        return apply(settings, realUa)
+        return apply(settings, realUa, capabilities)
     }
 
     /** Returns true if metadata was applied; false if unsupported or the UA had no Chrome version. */
-    fun apply(settings: WebSettings, realUa: String): Boolean {
-        if (!WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) return false
+    fun apply(settings: WebSettings, realUa: String, capabilities: WebViewCapabilities): Boolean {
+        if (!capabilities.userAgentMetadata) return false
         val fullVersion = NativeIdentity.chromeFullVersion(realUa) ?: return false
 
         val defaults = WebSettingsCompat.getUserAgentMetadata(settings)

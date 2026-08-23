@@ -1,10 +1,8 @@
 package com.geoalign.browser
 
-import android.annotation.SuppressLint
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -52,20 +50,15 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.ScriptHandler
-import androidx.webkit.WebSettingsCompat
-import androidx.webkit.WebViewCompat
-import androidx.webkit.WebViewFeature
 import com.geoalign.core.device.DeviceProfile
-import com.geoalign.core.device.NativeIdentity
 import com.geoalign.core.device.DeviceProfiles
 import com.geoalign.core.model.LocationProfile
 import com.geoalign.core.net.UrlNormalizer
 import com.geoalign.core.tabs.TabListReducer
 import com.geoalign.core.tabs.TabsState
 import com.geoalign.di.AppGraph
-import com.geoalign.web.environment.DeviceBundleCompiler
-import com.geoalign.web.environment.NativeUaMetadata
-import com.geoalign.web.environment.EnvBundleCompiler
+import com.geoalign.web.config.AndroidWebViewCapabilityProbe
+import com.geoalign.web.config.WebViewConfigurator
 import com.geoalign.web.policy.BrowserWebChromeClient
 import com.geoalign.web.policy.BrowserWebViewClient
 import kotlinx.coroutines.launch
@@ -78,7 +71,6 @@ private const val HOME_URL = "https://duckduckgo.com/"
  * a visible warning, safe external-scheme hand-off, system-managed downloads, a clear-session action,
  * and a site-info sheet describing what the browser is and isn't protecting.
  */
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun BrowserScreen(onExit: () -> Unit) {
     val context = LocalContext.current
@@ -87,6 +79,10 @@ fun BrowserScreen(onExit: () -> Unit) {
     // The real WebView UA, captured once. "This device" mode serves a cleaned (de-WebView-ified)
     // version so pages see a genuine Chrome rather than an embedded WebView.
     val deviceUa = remember { android.webkit.WebSettings.getDefaultUserAgent(context) }
+    // What the installed WebView supports, asked once. Every capability-dependent decision below
+    // reads these answers rather than re-querying the platform.
+    val capabilities = remember { AndroidWebViewCapabilityProbe(context).probe() }
+    val configurator = remember(capabilities, deviceUa) { WebViewConfigurator(capabilities, deviceUa) }
 
     var profile by remember { mutableStateOf<LocationProfile?>(null) }
     var loaded by remember { mutableStateOf(false) }
@@ -179,26 +175,15 @@ fun BrowserScreen(onExit: () -> Unit) {
         webView?.loadUrl(url)
     }
 
-    // The UA a device should present: a preset's spoofed UA, or the cleaned real UA for "This device".
-    fun uaFor(d: DeviceProfile): String =
-        if (d.native) NativeIdentity.reduceUserAgent(deviceUa) else d.userAgent
-
-    // Switch the emulated device live: swap the UA string, re-inject the device bundle, reload, and
-    // persist the choice back to the active profile so it sticks next session.
+    // Switch the emulated device live: the configurator swaps the UA string, the client hints and
+    // the injected device bundle; reload so the current page sees them, and persist the choice back
+    // to the active profile so it sticks next session.
     fun changeDevice(newDevice: DeviceProfile) {
         deviceMenuOpen = false
         if (newDevice.id == device.id) return
         device = newDevice
         webView?.let { wv ->
-            wv.settings.userAgentString = uaFor(newDevice)
-            // Client hints must follow the UA string, or the two contradict each other.
-            NativeUaMetadata.applyOrRestore(wv.settings, deviceUa, newDevice.native)
-            if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-                deviceScript?.remove()
-                deviceScript = WebViewCompat.addDocumentStartJavaScript(
-                    wv, DeviceBundleCompiler.compileFromAssets(wv.context, newDevice), setOf("*"),
-                )
-            }
+            deviceScript = configurator.applyDevice(wv, newDevice, deviceScript)
             wv.reload()
         }
         scope.launch {
@@ -347,11 +332,6 @@ fun BrowserScreen(onExit: () -> Unit) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
-                // On debuggable (sideload) builds, allow chrome://inspect so WebView-hostile sites
-                // can be diagnosed live. No-op on release.
-                if (ctx.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
-                    WebView.setWebContentsDebuggingEnabled(true)
-                }
                 WebView(ctx).apply {
                     // AndroidView leaves a child's own LayoutParams at WRAP_CONTENT and relies on
                     // Compose to measure it. WebView, however, derives its CSS viewport height from
@@ -363,33 +343,10 @@ fun BrowserScreen(onExit: () -> Unit) {
                         android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                         android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                     )
-                    settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        allowFileAccess = false
-                        allowContentAccess = false
-                        @Suppress("DEPRECATION")
-                        allowFileAccessFromFileURLs = false
-                        @Suppress("DEPRECATION")
-                        allowUniversalAccessFromFileURLs = false
-                        mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                        // Honor the page's <meta viewport> the way mobile Chrome does. Without this
-                        // (WebView default useWideViewPort=false), responsive sites are laid out at
-                        // the raw view width, so window.innerWidth/innerHeight and the
-                        // (orientation: landscape) media query can read as a wide/landscape desktop —
-                        // which is what makes Tinder show its "portrait view" gate. Enabling these
-                        // makes width=device-width resolve to the real CSS width, so orientation
-                        // reads portrait like it does in Chrome.
-                        useWideViewPort = true
-                        loadWithOverviewMode = true
-                        // Present the active device's UA from the very first request.
-                        userAgentString = uaFor(device)
-                    }
-                    // Native mode's client hints (and Sec-CH-UA headers) come from here.
-                    NativeUaMetadata.applyOrRestore(settings, deviceUa, device.native)
-                    if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) {
-                        WebSettingsCompat.setSafeBrowsingEnabled(settings, true)
-                    }
+                    // Settings matrix, user-agent + client hints, safe browsing and both
+                    // document-start bundles. Runs before the first loadUrl below, which is the
+                    // only ordering in which the bundles beat the page's own scripts.
+                    deviceScript = configurator.configure(this, activeProfile, device).device
 
                     webViewClient = BrowserWebViewClient(
                         onNav = { url, back, forward, loading ->
@@ -417,17 +374,6 @@ fun BrowserScreen(onExit: () -> Unit) {
                         enqueueDownload(ctx, url, userAgent, contentDisposition, mimeType)
                     }
 
-                    // Document-start hooks (order: location environment, then device signals). Both are
-                    // WebView-wide, so they apply to every tab loaded here.
-                    if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-                        WebViewCompat.addDocumentStartJavaScript(
-                            this, EnvBundleCompiler.compileFromAssets(ctx, activeProfile), setOf("*"),
-                        )
-                        deviceScript = WebViewCompat.addDocumentStartJavaScript(
-                            this, DeviceBundleCompiler.compileFromAssets(ctx, device), setOf("*"),
-                        )
-                    }
-
                     loadUrl(HOME_URL)
                 }.also { webView = it }
             },
@@ -435,11 +381,6 @@ fun BrowserScreen(onExit: () -> Unit) {
     }
 }
 
-/**
- * Turn the default WebView UA into a Chrome-like one: drop the "; wv" embedded-WebView marker, the
- * "Version/4.0 " WebView token, and the internal "Build/…" fingerprint. The result reads as mobile
- * Chrome, which sites like Tinder accept where an embedded-WebView UA is refused.
- */
 /** Launch a safe external scheme (tel:, mailto:, geo:, …) through the system, ignoring failures. */
 private fun openExternally(context: Context, url: String) {
     runCatching {
