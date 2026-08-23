@@ -56,6 +56,7 @@ import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.geoalign.core.device.DeviceProfile
+import com.geoalign.core.device.NativeIdentity
 import com.geoalign.core.device.DeviceProfiles
 import com.geoalign.core.model.LocationProfile
 import com.geoalign.core.net.UrlNormalizer
@@ -63,6 +64,7 @@ import com.geoalign.core.tabs.TabListReducer
 import com.geoalign.core.tabs.TabsState
 import com.geoalign.di.AppGraph
 import com.geoalign.web.environment.DeviceBundleCompiler
+import com.geoalign.web.environment.NativeUaMetadata
 import com.geoalign.web.environment.EnvBundleCompiler
 import com.geoalign.web.policy.BrowserWebChromeClient
 import com.geoalign.web.policy.BrowserWebViewClient
@@ -178,7 +180,8 @@ fun BrowserScreen(onExit: () -> Unit) {
     }
 
     // The UA a device should present: a preset's spoofed UA, or the cleaned real UA for "This device".
-    fun uaFor(d: DeviceProfile): String = if (d.native) deWebViewify(deviceUa) else d.userAgent
+    fun uaFor(d: DeviceProfile): String =
+        if (d.native) NativeIdentity.reduceUserAgent(deviceUa) else d.userAgent
 
     // Switch the emulated device live: swap the UA string, re-inject the device bundle, reload, and
     // persist the choice back to the active profile so it sticks next session.
@@ -188,6 +191,8 @@ fun BrowserScreen(onExit: () -> Unit) {
         device = newDevice
         webView?.let { wv ->
             wv.settings.userAgentString = uaFor(newDevice)
+            // Client hints must follow the UA string, or the two contradict each other.
+            NativeUaMetadata.applyOrRestore(wv.settings, deviceUa, newDevice.native)
             if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
                 deviceScript?.remove()
                 deviceScript = WebViewCompat.addDocumentStartJavaScript(
@@ -370,6 +375,8 @@ fun BrowserScreen(onExit: () -> Unit) {
                         // Present the active device's UA from the very first request.
                         userAgentString = uaFor(device)
                     }
+                    // Native mode's client hints (and Sec-CH-UA headers) come from here.
+                    NativeUaMetadata.applyOrRestore(settings, deviceUa, device.native)
                     if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) {
                         WebSettingsCompat.setSafeBrowsingEnabled(settings, true)
                     }
@@ -423,11 +430,6 @@ fun BrowserScreen(onExit: () -> Unit) {
  * "Version/4.0 " WebView token, and the internal "Build/…" fingerprint. The result reads as mobile
  * Chrome, which sites like Tinder accept where an embedded-WebView UA is refused.
  */
-private fun deWebViewify(ua: String): String = ua
-    .replace("; wv)", ")")
-    .replace(Regex(" Build/[A-Za-z0-9._-]+"), "")
-    .replace("Version/4.0 ", "")
-
 /** Launch a safe external scheme (tel:, mailto:, geo:, …) through the system, ignoring failures. */
 private fun openExternally(context: Context, url: String) {
     runCatching {

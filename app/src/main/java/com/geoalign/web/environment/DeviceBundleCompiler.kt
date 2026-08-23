@@ -48,6 +48,11 @@ object DeviceBundleCompiler {
         if (!profile.emitsClientHints) {
             return "def(navigator, \"userAgentData\", undefined);"
         }
+        // "This device" mode takes its client hints from WebSettingsCompat.setUserAgentMetadata
+        // instead, which drives navigator.userAgentData *and* the Sec-CH-UA request headers from a
+        // single source. Emitting a JS shim here as well would overwrite those correct values with
+        // this profile's placeholders and reintroduce the UA/UA-CH contradiction.
+        if (profile.native) return ""
         val brands = jsonBrandList(profile.brands.map { it.brand to it.major })
         val fullList = jsonBrandList(profile.brands.map { it.brand to it.full })
         val mobile = profile.mobile.toString()

@@ -23,11 +23,17 @@ class DeviceBundleCompilerTest {
         assertEquals("", DeviceBundleCompiler.geometryBlock(DeviceProfiles.NATIVE))
     }
 
-    @Test fun nativeStillEmitsChromeUserAgentData() {
-        val block = DeviceBundleCompiler.userAgentDataBlock(DeviceProfiles.NATIVE)
-        assertTrue(block.contains("getHighEntropyValues"))
-        assertTrue(block.contains("\"brand\":\"Google Chrome\""))
-        assertTrue(block.contains("mobile:true"))
+    /**
+     * Native mode deliberately emits **no** userAgentData shim: its client hints come from
+     * WebSettingsCompat.setUserAgentMetadata, which also fixes the Sec-CH-UA request headers.
+     *
+     * This inverts an earlier expectation. The shim used to inject this profile's placeholder
+     * values (Chrome 126 / Android 14.0.0 / empty model) over a UA string reporting the real
+     * Chrome 151 on Android 16 — a self-contradiction that reads as active spoofing to any site
+     * that cross-checks the two.
+     */
+    @Test fun nativeEmitsNoUserAgentDataShim() {
+        assertEquals("", DeviceBundleCompiler.userAgentDataBlock(DeviceProfiles.NATIVE))
     }
 
     @Test fun noUnsubstitutedPlaceholdersRemain() {
