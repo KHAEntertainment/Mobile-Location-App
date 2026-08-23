@@ -13,7 +13,8 @@ Milestones 1–3 are implemented and validated on-device. This tree contains:
   permissions), `LocalNetworkPolicy` (CIDR / hostname / alt-notation blocker, spec §16) with an
   exhaustive unit-test suite, `ReadinessReducer` (pure readiness state machine, spec §7), and
   `env_bundle.js` — the document-start environment bundle (geolocation / timezone / locale
-  virtualization, spec §11–13). A diagnostics page (`poc.html`) still exercises the POCs.
+  virtualization, spec §11–13). The `poc.html` harness that exercised the POCs was removed in
+  issue #8; the diagnostics screen now measures the production browser instead.
 - **M2 — data foundation.** VPN / effective-IP / IP-geolocation repositories, `ReadinessService`,
   JSON profile storage with Android Keystore for API keys, the profile editor, and "Match Browser
   to VPN".
@@ -109,9 +110,10 @@ in `app/src/community/java/com/geoalign/core/device/ExperimentalDeviceProfiles.k
 counterpart in `app/src/play` — the Play variant is not compiled with it, so the preset data is not
 in the Play artifact at all rather than being present and hidden. `testPlayDebugUnitTest` asserts
 this by scanning the variant's compiled bytecode. The remaining rows describe capabilities carried
-by an injected `DistributionCapabilities`; **`Diagnostics` and `Partner directory` are declared but
-not yet consumed by any surface**, so treat those two rows as the definition later work codes to,
-not as behaviour you can observe today.
+by an injected `DistributionCapabilities`. **`Diagnostics` is consumed as of issue #8** — the
+readiness screen offers no route to it on `play`. **`Partner directory` is still declared and not
+consumed by any surface**, so treat that row as the definition later work codes to, not as behaviour
+you can observe today.
 
 Both editions share the same core: the same alignment engine, the same hardened WebView, the same
 three constraints in the section above, and the same `INTERNET` + `ACCESS_NETWORK_STATE` permission
@@ -122,7 +124,7 @@ set. Neither edition implements a VPN, and neither makes an anonymity claim.
 | **Posture** | Conservative. Ships only what survives store review and is safe for a first-time user. | Everything, including the sharp edges. |
 | **Distribution** | Google Play (intended) | Sideloaded APK / GitHub Releases |
 | **Device identity** | **Initially "This device" only** — the real hardware identity, no spoof presets. | "This device" plus the full set of experimental device profiles (Pixel, Galaxy, iPhone, desktop Chrome). |
-| **Diagnostics** | User-facing readiness only. | Full developer diagnostics — what the browser actually exposes, per-signal pass/fail, and the injection-verification surface. |
+| **Diagnostics** | User-facing readiness only. No route to the diagnostics screen exists. | Full developer diagnostics — the compatibility report, measured through the production WebView configuration, with per-check `PASS` / `WARN` / `N/A` / `FAIL` and a copyable sanitized report. |
 | **Experimental features** | Off. Nothing behind an unverified flag reaches this edition. | Where experimental work lands first. |
 | **Partner directory** | Planned addition, later — a curated directory of VPN providers. Not present at first release. | Not applicable. |
 

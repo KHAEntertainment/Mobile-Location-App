@@ -167,6 +167,9 @@ fun ReadinessScreen(
             userAcceptedNoVpn = acceptedNoVpn,
             pendingAction = matching,
             actionError = matchError,
+            // Whether this edition has a diagnostics screen at all decides whether the row that
+            // leads to it exists. Read from the injected capabilities, never from BuildConfig.
+            developerDiagnostics = AppGraph.distributionCapabilities().developerDiagnostics,
         ),
     )
 

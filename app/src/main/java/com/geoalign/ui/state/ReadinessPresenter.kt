@@ -35,6 +35,13 @@ data class ReadinessPresentationInput(
      * last check failed outright. Null means no monitor, and the cached evaluation stands alone.
      */
     val liveMonitor: AlignmentMonitorState? = null,
+    /**
+     * Whether this edition ships developer diagnostics
+     * (`DistributionCapabilities.developerDiagnostics`, issue #4). False on `play`, where the
+     * diagnostics disclosure is not offered at all — the route is gated here, in pure code a test
+     * can reach, rather than only at the destination.
+     */
+    val developerDiagnostics: Boolean = false,
 )
 
 data class PresentationThresholds(
@@ -166,11 +173,15 @@ object ReadinessPresenter {
             ),
             secondaryActions = secondary,
             noVpnPrompt = if (offerNoVpn) copy.noVpnPrompt else null,
-            disclosures = listOf(
-                DisclosureItem(ActionId.OPEN_CONNECTION_DETAILS, copy.connectionDetailsLabel,
-                    eval?.effectiveIp?.let { EffectiveIpUtil.redact(it.ip) }),
-                DisclosureItem(ActionId.OPEN_DIAGNOSTICS, copy.diagnosticsLabel, null),
-            ),
+            disclosures = buildList {
+                add(DisclosureItem(ActionId.OPEN_CONNECTION_DETAILS, copy.connectionDetailsLabel,
+                    eval?.effectiveIp?.let { EffectiveIpUtil.redact(it.ip) }))
+                // Offered only where the destination exists. An edition without developer
+                // diagnostics gets no row rather than a row that does nothing.
+                if (input.developerDiagnostics) {
+                    add(DisclosureItem(ActionId.OPEN_DIAGNOSTICS, copy.diagnosticsLabel, null))
+                }
+            },
             connectionDetails = ConnectionDetailsBuilder.rows(eval, input.profile),
             disclaimerShort = copy.disclaimerShort,
             disclaimerFull = copy.disclaimerFull,
