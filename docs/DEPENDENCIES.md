@@ -84,17 +84,19 @@ prerequisite, not a redistributed component.
 
 ## 5. Declared in the catalog but not used
 
-| Component | Version | License | Status |
-|---|---|---|---|
-| `androidx.room:room-runtime` | 2.6.1 | Apache-2.0 | **Unused** |
-| `androidx.room:room-ktx` | 2.6.1 | Apache-2.0 | **Unused** |
-| `androidx.room:room-compiler` | 2.6.1 | Apache-2.0 | **Unused** |
+**None.** Every alias in `gradle/libs.versions.toml` is referenced by a build script, and every
+`[versions]` key is reachable from a `[libraries]` or `[plugins]` entry.
 
-The three Room entries are present in `gradle/libs.versions.toml` but are referenced nowhere in
-`app/build.gradle.kts`. Room was dropped in favour of kotlinx.serialization plus Android Keystore to
-avoid an annotation processor (`docs/HANDOFF.md` §4). **Room is not in the APK.** Removing the stale
-catalog entries is a Gradle change and therefore out of scope for the documentation-only issue that
-created this file.
+This section previously listed three Room artifacts (`room-runtime`, `room-ktx`, `room-compiler` at
+2.6.1). They were declared in the catalog but referenced nowhere, because Room was dropped in favour
+of kotlinx.serialization plus Android Keystore to avoid an annotation processor
+(`docs/HANDOFF.md` §4). They were never in the APK. #11 removed them from the catalog along with
+their shared `room` version key, so there is no longer a stale alias inviting someone to
+`implementation(libs.room.runtime)` and quietly reintroduce the dependency the project deliberately
+declined.
+
+If you add a catalog entry, add the build-script reference in the same change. An entry with no
+consumer belongs in neither this file nor the catalog.
 
 ## 6. Runtime network services
 
