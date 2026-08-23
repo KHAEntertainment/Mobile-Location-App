@@ -24,6 +24,9 @@ class AndroidWebViewCapabilityProbe(private val context: Context) : WebViewCapab
             userAgentMetadata = WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA),
             safeBrowsing = WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE),
             serviceWorkerControl = WebViewFeature.isFeatureSupported(WebViewFeature.SERVICE_WORKER_BASIC_USAGE),
+            errorDescription = WebViewFeature.isFeatureSupported(
+                WebViewFeature.WEB_RESOURCE_ERROR_GET_DESCRIPTION,
+            ),
             packageName = installed?.packageName,
             packageVersion = installed?.versionName,
         )
