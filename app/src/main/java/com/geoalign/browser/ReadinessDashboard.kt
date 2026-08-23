@@ -72,13 +72,21 @@ fun ReadinessDashboard(
 
     // One-tap "Match Browser to VPN" (spec §9): turn the live IP-geolocation estimate into a saved
     // profile. MVP keeps a single active profile, so we replace any existing one.
+    //
+    // The estimate is re-fetched here rather than taken from `eval`. Reading the cached evaluation
+    // saved whatever was observed at the *last* refresh, so changing VPN exit and pressing this
+    // stored the previous country and then re-rendered with the new one — the dashboard showed
+    // Lagos while the saved profile said Singapore. Evaluating first makes what we save and what we
+    // display come from the same observation. `profileSelected = true` is correct in advance: on
+    // success a profile exists, and on failure the error path is what the user sees.
     fun matchToVpn() {
-        val geo = eval?.geolocation ?: return
-        if (geo.latitude == null || geo.longitude == null) return
         loading = true
         error = null
         scope.launch {
             runCatching {
+                val fresh = service.evaluate(profileSelected = true)
+                val geo = fresh.geolocation
+                    ?: throw IllegalStateException("no location estimate for the current connection")
                 val profile = ProfileFactory.fromGeolocation(
                     geo = geo,
                     contentLanguage = Locale.getDefault().language.ifBlank { "en" },
@@ -88,7 +96,7 @@ fun ReadinessDashboard(
                 store.clear()
                 store.upsert(profile)
                 activeProfileName = profile.name
-                service.evaluate(profileSelected = true)
+                fresh
             }.onSuccess { eval = it; loading = false }
                 .onFailure { error = it.message ?: "could not save profile"; loading = false }
         }
