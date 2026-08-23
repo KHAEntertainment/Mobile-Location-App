@@ -2,9 +2,10 @@
 
 > Purpose of this file: give a new (Claude Code) session everything it needs to pick up
 > where we left off — **current status, the decisions and war stories that got us here, and the
-> next logical steps** — without re-stating what's already documented. The full product spec,
-> plan, and honesty constraints live in [`ARCHITECTURE_PLAN.md`](ARCHITECTURE_PLAN.md); this doc
-> does **not** repeat them. Last updated **2026-08-23**, repo at `main` (commit `409b888`).
+> next logical steps** — without re-stating what's already documented. The architecture plan and
+> honesty constraints live in [`ARCHITECTURE_PLAN.md`](ARCHITECTURE_PLAN.md); this doc does **not**
+> repeat them. **⚠ The original engineering spec is NOT in the repo** — see §8 for what the `§n`
+> code references actually point to. Last updated **2026-08-23**, repo at `main`.
 
 ---
 
@@ -134,7 +135,9 @@ no Room** (avoids an annotation processor and keeps CI simple).
    am I on?" stops being guesswork. Consider a `BuildConfig` git-SHA field.
 6. **Refresh `README.md`** — its Status section still says "Milestone 1 (POCs)".
 7. **Toolchain upgrade path** (webkit 1.16 / API 36) once everything is stable and green.
-8. **Remaining spec sections** not yet built — check `ARCHITECTURE_PLAN.md` for the full list.
+8. **Remaining scope** not yet built — `ARCHITECTURE_PLAN.md` is the best in-repo list of intended
+   scope, but the authoritative requirement list lives in the uncommitted spec (see §8); confirm
+   with Billy before treating any `spec §n` as ground truth.
 
 ---
 
@@ -178,11 +181,29 @@ constraints in §1.
 
 ---
 
-## 8. Existing docs (read, don't duplicate)
+## 8. The spec, the `§n` references, and existing docs
+
+**Read this before trusting any `§n` comment.** The code carries two *different* section-numbering
+systems, and they are not interchangeable:
+
+- **`spec §n`** → the original **engineering spec** — an uploaded ~31-section `.docx` that was the
+  source material for the whole project. It is the authoritative source for exact requirement
+  wording (e.g. the §3 no-VPN behavior), but it was **never committed to this repo**. It only exists
+  in the project owner's (Billy's) hands. A `spec §n` reference therefore **cannot be resolved from
+  the repo alone**.
+- **`plan §n`** → [`docs/ARCHITECTURE_PLAN.md`](ARCHITECTURE_PLAN.md), which is a *derived*
+  architecture plan (generated at M0 as a response to the spec) with its **own independent
+  numbering**. It is **not** the spec and its `§n` do not map 1:1 to the spec's.
+
+Until the spec is committed, treat the **code comments + `ARCHITECTURE_PLAN.md` as the surviving
+evidence**, and **flag ambiguity rather than assert** exact spec wording. **Recommended fix:** ask
+Billy for the original spec and commit it (e.g. `docs/ENGINEERING_SPEC.md`) so `spec §n` references
+resolve to a real source of truth.
 
 | File | What it covers |
 |------|----------------|
-| `docs/ARCHITECTURE_PLAN.md` | Full product spec, plan, section numbers (`§n` refs in code), honesty constraints |
+| `docs/ARCHITECTURE_PLAN.md` | Derived architecture plan + honesty constraints; **its own numbering** (`plan §n`), not the spec |
+| *(uncommitted)* engineering spec `.docx` | The real requirements + `spec §n` numbering — held by Billy, not in the repo |
 | `docs/VALIDATION_M1.md` | M1 adversarial review findings + dispositions |
 | `docs/POC_NOTES.md` | What each POC proves and how to read pass/fail |
 | `docs/TROUBLESHOOTING_WEBVIEW.md` | WebView-hostile sites (Tinder), native mode, viewport fix, `chrome://inspect` checklist |
