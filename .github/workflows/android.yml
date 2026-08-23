@@ -24,9 +24,9 @@ jobs:
       matrix:
         include:
           - flavor: play
-            Flavor: Play
+            gradleFlavor: Play
           - flavor: community
-            Flavor: Community
+            gradleFlavor: Community
     name: build (${{ matrix.flavor }})
     steps:
       - name: Checkout
@@ -45,15 +45,15 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Run unit tests
-        run: ./gradlew test${{ matrix.Flavor }}DebugUnitTest --stacktrace
+        run: ./gradlew test${{ matrix.gradleFlavor }}DebugUnitTest --stacktrace
 
       # The `|| true` is deliberate and predates flavors: lint has never been able to fail this
       # build. Removing it is M7 work and out of scope here.
       - name: Lint
-        run: ./gradlew lint${{ matrix.Flavor }}Debug --stacktrace || true
+        run: ./gradlew lint${{ matrix.gradleFlavor }}Debug --stacktrace || true
 
       - name: Build debug APK
-        run: ./gradlew assemble${{ matrix.Flavor }}Debug --stacktrace
+        run: ./gradlew assemble${{ matrix.gradleFlavor }}Debug --stacktrace
 
       # Flavored builds output to app/build/outputs/apk/<flavor>/debug/app-<flavor>-debug.apk.
       # `community` additionally keeps the historical unflavored filename so the sideload link
@@ -80,7 +80,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-report-${{ matrix.flavor }}
-          path: app/build/reports/tests/test${{ matrix.Flavor }}DebugUnitTest/
+          path: app/build/reports/tests/test${{ matrix.gradleFlavor }}DebugUnitTest/
 
   # Publishing is its own job so the two matrix legs cannot race each other writing the same
   # `latest-debug` tag, and so the release only appears when *both* editions built.
