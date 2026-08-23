@@ -41,20 +41,22 @@ pointed at a supported one; see [`docs/HANDOFF.md`](docs/HANDOFF.md) §6 for the
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21
 export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
 
-# Unit tests (no device needed)
-./gradlew testDebugUnitTest
+# Unit tests (no device needed). Every task below is per-edition — see ## Editions; there is
+# no unflavored `testDebugUnitTest` / `assembleDebug` any more.
+./gradlew testPlayDebugUnitTest testCommunityDebugUnitTest
 
 # Static analysis
-./gradlew lintDebug
+./gradlew lintPlayDebug lintCommunityDebug
 
-# Debug APK -> app/build/outputs/apk/debug/app-debug.apk
-./gradlew assembleDebug
+# Debug APKs -> app/build/outputs/apk/<flavor>/debug/app-<flavor>-debug.apk
+./gradlew assemblePlayDebug assembleCommunityDebug
 
-# Install on a connected device / emulator
+# Install on a connected device / emulator. Both editions can be installed at once; the
+# community one is the complete build and the usual choice for sideloading.
 # NOTE: replacing a CI-built APK fails with INSTALL_FAILED_UPDATE_INCOMPATIBLE (different
 # debug keystore) and needs `adb uninstall` first, which wipes saved profiles and the
 # Keystore-held API key. See docs/HANDOFF.md §6 to rescue profiles beforehand.
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/community/debug/app-community-debug.apk
 
 # Sanitized logs
 adb logcat | grep -i geoalign
@@ -62,10 +64,12 @@ adb logcat | grep -i geoalign
 
 ### CI
 
-Push to `main` or any `feature/**` branch, or run the **Android CI** workflow manually. It:
-1. runs unit tests, 2. lints, 3. builds the debug APK, and 4. uploads `app-debug.apk` as a
-downloadable artifact. Download it from the workflow run's *Artifacts* section and sideload it on
-your phone — no local Android Studio required.
+Push to `main` or any `feature/**` branch, or run the **Android CI** workflow manually. It runs one
+matrix leg per edition — for each of `play` and `community` it 1. runs that edition's unit tests,
+2. lints, 3. builds that edition's debug APK, and 4. uploads it as a downloadable artifact
+(`geoalign-play-debug-apk` / `geoalign-community-debug-apk`). Download one from the workflow run's
+*Artifacts* section and sideload it — no local Android Studio required. A green `community` leg says
+nothing about `play`: the two compile different source sets, which is the point of the split.
 
 ## Key toolchain versions
 
@@ -87,13 +91,21 @@ in. The app must function without any location permission.
 > merged manifest is scheduled for the M7 release-gate work; until then, verify by reading
 > [`app/src/main/AndroidManifest.xml`](app/src/main/AndroidManifest.xml).
 
-## Editions (planned — not in the build yet)
+## Editions
 
-Two product editions are planned, `play` and `community`. **Neither exists in the build today** —
-`app/build.gradle.kts` declares no `productFlavors`, and every build produced from this tree right
-now is the single unflavored app. This section documents the intended split so that work landing
-against it has one definition to code to; treat every row below as a plan, not as behaviour you can
-observe.
+Two product editions ship from this tree, `play` and `community`, as Gradle product flavors. Build
+them with `assemblePlayDebug` / `assembleCommunityDebug`. `community` carries the applicationId
+suffix `.community` (`com.geoalign.browser.community`) and the launcher label "GeoAlign Community",
+so both editions install and run side by side on one device.
+
+The **Device identity** row below is enforced structurally, not by a setting. The spoof presets live
+in `app/src/community/java/com/geoalign/core/device/ExperimentalDeviceProfiles.kt`, a file with no
+counterpart in `app/src/play` — the Play variant is not compiled with it, so the preset data is not
+in the Play artifact at all rather than being present and hidden. `testPlayDebugUnitTest` asserts
+this by scanning the variant's compiled bytecode. The remaining rows describe capabilities carried
+by an injected `DistributionCapabilities`; **`Diagnostics` and `Partner directory` are declared but
+not yet consumed by any surface**, so treat those two rows as the definition later work codes to,
+not as behaviour you can observe today.
 
 Both editions share the same core: the same alignment engine, the same hardened WebView, the same
 three constraints in the section above, and the same `INTERNET` + `ACCESS_NETWORK_STATE` permission
@@ -113,9 +125,12 @@ is exactly the behaviour an app-store reviewer scrutinises, while it is the whol
 for a user who sideloads deliberately. Rather than weaken the tool, `play` starts narrow and
 `community` stays complete.
 
-**Implementation note for contributors:** when these flavors do land, edition differences flow
-through an injected `DistributionCapabilities` value, never through `if (BuildConfig.FLAVOR)` at a
-call site. See [`CONTRIBUTING.md`](CONTRIBUTING.md) §5.
+**Implementation note for contributors:** edition differences flow through the
+`DistributionCapabilities` value injected by `AppGraph.distributionCapabilities()`, never through
+`if (BuildConfig.FLAVOR)` at a call site. Where a difference means code must be *absent* rather than
+inert — the device presets — put the code in a flavor source set and let the other flavor not have
+it; a capability flag describes that fact, it does not create it. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) §5.
 
 ## Contributing
 

@@ -12,8 +12,22 @@ permissions:
   contents: write
 
 jobs:
+  # One leg per distribution edition (issue #4). Both must test and build; a green `community`
+  # proves nothing about `play`, because the two compile different source sets — `play` is built
+  # without core/device/ExperimentalDeviceProfiles.kt entirely.
   build:
     runs-on: ubuntu-latest
+    strategy:
+      # Report both editions' results rather than cancelling the sibling on first failure: when a
+      # change breaks only one edition, that asymmetry is the diagnostic.
+      fail-fast: false
+      matrix:
+        include:
+          - flavor: play
+            Flavor: Play
+          - flavor: community
+            Flavor: Community
+    name: build (${{ matrix.flavor }})
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,52 +45,91 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: Run unit tests
-        run: ./gradlew testDebugUnitTest --stacktrace
+        run: ./gradlew test${{ matrix.Flavor }}DebugUnitTest --stacktrace
 
+      # The `|| true` is deliberate and predates flavors: lint has never been able to fail this
+      # build. Removing it is M7 work and out of scope here.
       - name: Lint
-        run: ./gradlew lintDebug --stacktrace || true
+        run: ./gradlew lint${{ matrix.Flavor }}Debug --stacktrace || true
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assemble${{ matrix.Flavor }}Debug --stacktrace
 
+      # Flavored builds output to app/build/outputs/apk/<flavor>/debug/app-<flavor>-debug.apk.
+      # `community` additionally keeps the historical unflavored filename so the sideload link
+      # published before this change keeps resolving; it is the edition that was being sideloaded.
       - name: Stage APK with a friendly name
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk "dist/geoalign-debug-${GITHUB_SHA::7}.apk"
-          cp app/build/outputs/apk/debug/app-debug.apk "dist/geoalign-latest-debug.apk"
+          SRC="app/build/outputs/apk/${{ matrix.flavor }}/debug/app-${{ matrix.flavor }}-debug.apk"
+          cp "$SRC" "dist/geoalign-${{ matrix.flavor }}-debug-${GITHUB_SHA::7}.apk"
+          cp "$SRC" "dist/geoalign-${{ matrix.flavor }}-latest-debug.apk"
+          if [ "${{ matrix.flavor }}" = "community" ]; then
+            cp "$SRC" "dist/geoalign-latest-debug.apk"
+          fi
 
       - name: Upload debug APK artifact (backup)
         uses: actions/upload-artifact@v4
         with:
-          name: geoalign-debug-apk
-          path: dist/geoalign-latest-debug.apk
-          if-no-files-found: warn
+          name: geoalign-${{ matrix.flavor }}-debug-apk
+          path: dist/
+          if-no-files-found: error
 
       - name: Upload unit test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unit-test-report
-          path: app/build/reports/tests/testDebugUnitTest/
+          name: unit-test-report-${{ matrix.flavor }}
+          path: app/build/reports/tests/test${{ matrix.Flavor }}DebugUnitTest/
 
-      # Publish the raw APK to a rolling "latest" pre-release on every successful main build.
-      # One stable URL, direct .apk download (no zip), no 90-day expiry.
+  # Publishing is its own job so the two matrix legs cannot race each other writing the same
+  # `latest-debug` tag, and so the release only appears when *both* editions built.
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download both editions' APKs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: geoalign-*-debug-apk
+          merge-multiple: true
+          path: dist
+
+      - name: List what will be published
+        run: ls -lh dist/
+
+      # Publish the raw APKs to a rolling "latest" pre-release on every successful main build.
+      # Stable URLs, direct .apk downloads (no zip), no 90-day expiry.
       - name: Publish rolling latest release
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest-debug
           name: "Latest debug build"
           body: |
-            Auto-published debug APK from the newest `main` build.
+            Auto-published debug APKs from the newest `main` build.
             Commit: ${{ github.sha }}
             Build run: ${{ github.run_number }}
 
-            Sideloadable (debug-signed). Download `geoalign-latest-debug.apk` below.
-            The commit-stamped copy is kept for reference.
+            Sideloadable (debug-signed). Two editions are published:
+
+            - `geoalign-community-latest-debug.apk` — the **community** edition: full device-profile
+              set and developer diagnostics. This is the one to sideload.
+              `geoalign-latest-debug.apk` is the same file under its historical name.
+            - `geoalign-play-latest-debug.apk` — the **play** edition: "This device" identity only,
+              no developer diagnostics. Published so the store build is testable, not because it is
+              the recommended download.
+
+            They carry different application ids (`com.geoalign.browser` and
+            `com.geoalign.browser.community`), so both can be installed at once.
+
+            The commit-stamped copies are kept for reference.
           prerelease: true
           files: |
             dist/geoalign-latest-debug.apk
-            dist/geoalign-debug-*.apk
+            dist/geoalign-play-latest-debug.apk
+            dist/geoalign-community-latest-debug.apk
+            dist/geoalign-play-debug-*.apk
+            dist/geoalign-community-debug-*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

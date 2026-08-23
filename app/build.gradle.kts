@@ -19,6 +19,29 @@ android {
         // No location, wifi, bluetooth, camera, or mic permissions. Ever.
     }
 
+    // Distribution editions (issue #4, README `## Editions`). One dimension, two flavors:
+    //   play      — conservative; only what survives store review. "This device" identity only.
+    //   community — sideloaded and complete, including the experimental device presets.
+    //
+    // The difference is expressed as source sets (`src/play`, `src/community`) supplying
+    // `DistributionCapabilities` and `DeviceProfileCatalog`, NOT as `BuildConfig.FLAVOR` checks at
+    // call sites. `src/community` additionally contains `ExperimentalDeviceProfiles.kt`, which has
+    // no counterpart in `src/play`, so the spoof presets are not compiled into the Play artifact at
+    // all. See `CONTRIBUTING.md` §5.
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("play") {
+            dimension = "distribution"
+            // Keeps the base applicationId: com.geoalign.browser
+        }
+        create("community") {
+            dimension = "distribution"
+            // Distinct applicationId so both editions install side by side on one device.
+            applicationIdSuffix = ".community"
+            versionNameSuffix = "-community"
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
