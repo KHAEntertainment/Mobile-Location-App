@@ -50,7 +50,9 @@ change Android's system GPS, and makes no anonymity guarantee.
 - `onBlocked` is wired in both policy clients and discarded at every call site.
 - No `WebView.destroy()`, `onRenderProcessGone`, `onShowFileChooser`, `setSupportMultipleWindows`,
   or `ServiceWorkerControllerCompat` anywhere in the tree.
-- Diagnostics injects a hardcoded London profile through a separate POC WebView.
+- ~~Diagnostics injects a hardcoded London profile through a separate POC WebView.~~ Fixed in #8:
+  the report is measured through the production `WebViewConfigurator` over the active profile and
+  device, and is gated on `DistributionCapabilities.developerDiagnostics`.
 - Every `§n` reference in the code points at an **external spec that was never committed**.
   `docs/ARCHITECTURE_PLAN.md` is a response to it with independent numbering.
 - Tinder still gates the browser. The viewport hypothesis was falsified — the fix shipped in

@@ -92,6 +92,7 @@ class ReadinessPresenterTest {
         accepted: Boolean = false,
         liveVpn: VpnTransport? = null,
         error: String? = null,
+        developerDiagnostics: Boolean = false,
     ) = ReadinessPresentationInput(
         phase = phase,
         evaluation = evaluation,
@@ -101,7 +102,33 @@ class ReadinessPresenterTest {
         nowMillis = now,
         userAcceptedNoVpn = accepted,
         liveVpn = liveVpn,
+        developerDiagnostics = developerDiagnostics,
     )
+
+    // --- distribution gating ---------------------------------------------------------------
+
+    /**
+     * The diagnostics route is gated in pure code, so both editions are reachable from a JVM test.
+     * On an edition without developer diagnostics there is no row at all — not a disabled one, and
+     * not one that leads nowhere.
+     */
+    @Test fun theDiagnosticsDisclosureIsOfferedOnlyWhereTheScreenExists() {
+        val withoutIt = ReadinessPresenter.present(input(developerDiagnostics = false))
+        assertTrue(withoutIt.disclosures.none { it.id == ActionId.OPEN_DIAGNOSTICS })
+        assertTrue(withoutIt.disclosures.any { it.id == ActionId.OPEN_CONNECTION_DETAILS })
+
+        val withIt = ReadinessPresenter.present(input(developerDiagnostics = true))
+        assertTrue(withIt.disclosures.any { it.id == ActionId.OPEN_DIAGNOSTICS })
+    }
+
+    /** Gating one row must not disturb the rest of the screen. */
+    @Test fun gatingDiagnosticsChangesNothingElseOnTheScreen() {
+        val off = ReadinessPresenter.present(input(developerDiagnostics = false))
+        val on = ReadinessPresenter.present(input(developerDiagnostics = true))
+        assertEquals(off.status, on.status)
+        assertEquals(off.allActions, on.allActions)
+        assertEquals(off.connectionDetails, on.connectionDetails)
+    }
 
     // --- baseline states -------------------------------------------------------------------
 
@@ -269,6 +296,7 @@ class ReadinessPresenterTest {
             input(prof = profile(country = "SG", city = "Singapore", lat = 1.35, lon = 103.82)),
             input(phase = LoadPhase.ERROR),
             input(liveVpn = VpnTransport.NOT_DETECTED),
+            input(developerDiagnostics = true),
         )
         for (c in cases) {
             val s = ReadinessPresenter.present(c)

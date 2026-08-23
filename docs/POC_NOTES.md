@@ -1,7 +1,12 @@
 # POC Notes (Milestone 1)
 
-What each proof-of-concept verifies and how to read the on-device diagnostics page
-(`file:///android_asset/poc.html`, loaded automatically by the POC harness).
+What each proof-of-concept verified, kept as the record of Milestone 1.
+
+**Historical.** The `poc.html` page and the harness that loaded it were deleted in issue #8: the
+production settings matrix sets `allowFileAccess = false`, so a correctly configured browser cannot
+load `file:///android_asset/` at all, and the harness proved nothing about it. What each POC checked
+by hand is now checked by the diagnostics report, measured through the production
+`WebViewConfigurator` (`ui/diagnostics/DiagnosticsScreen.kt`, `core/diagnostics/`).
 
 ## POC 1 — Document-start injection
 The page checks `window.__GEOALIGN__`. If present, the environment bundle installed **before** page

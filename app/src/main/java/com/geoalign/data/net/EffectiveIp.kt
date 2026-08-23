@@ -1,5 +1,6 @@
 package com.geoalign.data.net
 
+import com.geoalign.core.net.IpRedaction
 import com.geoalign.core.net.LocalNetworkPolicy
 
 /** IP protocol family of an effective public address (spec §7). */
@@ -29,14 +30,10 @@ object EffectiveIpUtil {
     /**
      * Redact an IP for release logging (spec §7 / §21): keep enough to be diagnostic, drop the
      * host-identifying tail. 203.0.113.42 -> "203.0.x.x"; 2606:4700:... -> "2606:4700:…".
+     *
+     * The rule itself is [IpRedaction], in `core/`, because the diagnostics report redacts the same
+     * addresses and pure code cannot import `data/`. Kept here as the name every existing call site
+     * already uses, so there is one implementation and two spellings rather than two rules.
      */
-    fun redact(ip: String): String {
-        return if (ip.contains(':')) {
-            val parts = ip.split(':').filter { it.isNotEmpty() }
-            (parts.take(2).joinToString(":")) + ":…"
-        } else {
-            val octets = ip.split('.')
-            if (octets.size == 4) "${octets[0]}.${octets[1]}.x.x" else "x.x.x.x"
-        }
-    }
+    fun redact(ip: String): String = IpRedaction.redact(ip)
 }

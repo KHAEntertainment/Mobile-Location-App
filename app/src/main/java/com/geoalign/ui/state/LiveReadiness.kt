@@ -14,6 +14,9 @@ import com.geoalign.data.monitor.AlignmentSnapshot
  *   nothing about — "Re-match", which deliberately re-fetches its own estimate so the profile it
  *   saves and the exit it displays come from the same observation.
  * @param actionError the failure from that work, if any.
+ * @param developerDiagnostics `DistributionCapabilities.developerDiagnostics` for this edition. It
+ *   arrives as a parameter rather than being read here, because `ui/state` is pure and the value
+ *   comes from `AppGraph` — and because a test has to be able to present both editions.
  */
 object LiveReadiness {
 
@@ -23,6 +26,7 @@ object LiveReadiness {
         userAcceptedNoVpn: Boolean = false,
         pendingAction: Boolean = false,
         actionError: String? = null,
+        developerDiagnostics: Boolean = false,
     ): ReadinessPresentationInput = ReadinessPresentationInput(
         phase = phase(snapshot, pendingAction, actionError),
         evaluation = snapshot.evaluation,
@@ -36,6 +40,7 @@ object LiveReadiness {
         // value that means nothing.
         liveVpn = snapshot.monitor.transport.takeIf { it != VpnTransport.CHECKING },
         liveMonitor = snapshot.monitor,
+        developerDiagnostics = developerDiagnostics,
     )
 
     /**

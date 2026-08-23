@@ -14,6 +14,17 @@ import com.geoalign.core.device.NativeIdentity
  *
  * Every field here is a deliberate deviation from, or confirmation of, a WebView default — the
  * comments say which and why.
+ *
+ * **Deliberately absent: `OFF_SCREEN_PRERASTER`.** The POC diagnostics WebView deleted in issue #8
+ * set it (`WebSettingsCompat.setOffscreenPreRaster`); the production browser never has, and this
+ * records that as a decision rather than letting it disappear with the file. The setting keeps an
+ * *off-screen* WebView's tiles rastered so it does not flash blank when it is scrolled or animated
+ * into view, at the cost of holding that raster memory permanently. Neither WebView in this app is
+ * in that situation: the browser's is the on-screen surface for its whole lifetime, and the
+ * diagnostics one is a single pixel whose pixels are never read — it is measured through
+ * `evaluateJavascript`, not looked at. Enabling it would spend memory on low-end sideload targets
+ * to prevent a flash that cannot occur. If a surface ever does render a WebView off-screen and
+ * animate it in, this is the field to add, with that surface as the reason.
  */
 data class BrowserSettingsSpec(
     /** Required: the injected environment and device bundles are JavaScript. */
