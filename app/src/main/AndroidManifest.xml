@@ -7,19 +7,95 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- Defensive removals: if any dependency tries to merge these in, strip them.
-         The app must function without any of these. -->
+         The app must function without any of these.
+
+         This block is the authoritative list. It covers every category named as
+         "explicitly absent" in docs/ARCHITECTURE_PLAN.md §7; that section points back here
+         rather than restating the names, so the two cannot drift apart again. Categories
+         deliberately left out carry a comment at the end of the block saying why. -->
+
+    <!-- Location. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove" />
+
+    <!-- Wifi state. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" tools:node="remove" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" tools:node="remove" />
+
+    <!-- Bluetooth / nearby devices. BLUETOOTH and BLUETOOTH_ADMIN are the pre-API-31 spelling
+         that the runtime trio replaced; both spellings are listed because a dependency compiled
+         against an older SDK merges the legacy pair, not the new one. NEARBY_WIFI_DEVICES is
+         the API 33 permission that lets an app scan for nearby wifi without holding location. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" tools:node="remove" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" tools:node="remove" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" tools:node="remove" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" tools:node="remove" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" tools:node="remove" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" tools:node="remove" />
+
+    <!-- Activity recognition. The GMS-namespaced name is the pre-API-29 spelling and is the one a
+         Play-services-derived dependency would merge; the platform permission arrived in API 29. -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" tools:node="remove" />
+    <uses-permission android:name="com.google.android.gms.permission.ACTIVITY_RECOGNITION" tools:node="remove" />
+
     <!-- tools:ignore is a false positive, not a waiver: the ChromeOS check assumes a CAMERA
          permission implies camera hardware, but this line *removes* the permission rather than
          requesting it, so there is no implied feature to declare. Adding a <uses-feature> tag
          instead would advertise hardware the app deliberately never touches. -->
     <uses-permission android:name="android.permission.CAMERA" tools:node="remove"
         tools:ignore="PermissionImpliesUnsupportedChromeOsHardware" />
+
+    <!-- Microphone. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove" />
+
+    <!-- Contacts. GET_ACCOUNTS sits in the CONTACTS permission group and exposes the same
+         account-identity surface, so it goes with the other two. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" tools:node="remove" />
+    <uses-permission android:name="android.permission.WRITE_CONTACTS" tools:node="remove" />
+    <uses-permission android:name="android.permission.GET_ACCOUNTS" tools:node="remove" />
+
+    <!-- Phone state. READ_PHONE_NUMBERS is the API 26+ split of the subscriber-identity half of
+         READ_PHONE_STATE and is separately grantable, so it needs its own removal. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" tools:node="remove" />
+
+    <!-- Broad storage. The app writes nothing to shared storage itself; downloads are handed to
+         Android's DownloadManager.
+         tools:ignore here is the same false positive the CAMERA line above documents, in a second
+         flavour: ScopedStorage reads these as storage *requests* and advises migrating to the
+         scoped READ_MEDIA_* permissions or MediaStore intents. There is nothing to migrate — the
+         lines remove the permissions rather than request them, and migrating would mean adding
+         the very access this block exists to refuse. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"
+        tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove"
+        tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:node="remove"
+        tools:ignore="ScopedStorage" />
+
+    <!-- Local network. ACCESS_LOCAL_NETWORK is API 36 and this module builds against compileSdk 35,
+         so the platform SDK does not know the name yet. That is fine: the manifest merger matches
+         uses-permission nodes on the literal android:name string and never resolves them against
+         the SDK, so the removal is armed today and simply has nothing to match until a dependency
+         targeting API 36 tries to merge it. Verified against lintDebug at compileSdk 35 — no new
+         finding. Revisit during the M7 API 36 migration only to confirm it still reads correctly,
+         not because it needs changing. Note this is the *permission* backstop only; the actual
+         local-network blocking is LocalNetworkPolicy in the WebView request path (§9). -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" tools:node="remove" />
+
+    <!-- Deliberately NOT removed:
+         * POST_NOTIFICATIONS — §7 lists it as "omitted in MVP unless a concrete notification
+           feature lands", which is a different claim from "must never be present". Removing it
+           would pre-emptively veto a feature the plan leaves open. It is absent because nothing
+           requests it, and that is the whole of the commitment.
+         * READ_MEDIA_IMAGES / _VIDEO / _AUDIO — scoped media access is not the "broad storage"
+           §7 rules out, and the planned onShowFileChooser support may legitimately need one.
+           Considered and left in scope for that work rather than blocked here.
+         * <application-id>.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION — androidx.core merges this
+           signature-level permission, scoped to this app's own package, so it can register
+           unexported runtime receivers. It grants nothing to anything else and appears in the
+           merged manifest; the M7 assertion test must allow it. -->
 
     <application
         android:allowBackup="false"

@@ -78,9 +78,15 @@ your phone — no local Android Studio required.
 
 ## Permissions
 
-Only `INTERNET` and `ACCESS_NETWORK_STATE`. Location, wifi, camera, and microphone permissions are
-explicitly removed in the manifest with `tools:node="remove"`, so a dependency cannot merge one back
-in. The app must function without any location permission.
+Only `INTERNET` and `ACCESS_NETWORK_STATE`. Every permission category the architecture plan rules
+out — location, wifi-state, bluetooth/nearby, activity-recognition, camera, microphone, contacts,
+phone-state, broad storage, and local-network — is explicitly removed in the manifest with
+`tools:node="remove"`, so a dependency cannot merge one back in. The app must function without any
+location permission.
+
+The merged manifest also carries `<applicationId>.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, a
+signature-level permission scoped to this app's own package that `androidx.core` adds so it can
+register unexported runtime receivers. It grants nothing to any other app.
 
 > **No automated test asserts their absence.** There is no `app/src/androidTest` source set in this
 > repository yet, so the claim rests on the manifest, not on a test. The assertion against the
