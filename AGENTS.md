@@ -10,9 +10,10 @@ already-running, user-operated VPN. It does **not** implement a VPN, does **not*
 system GPS, and makes no anonymity guarantee.
 
 Current status: **Milestones 1–3 implemented** (POCs, data foundation, browser) and validated
-on-device. Last green CI build = **#21, commit `24fb4c7`** ("This device" native mode). The Tinder
-viewport fix (`c8f9b55`) is committed but **never built** — CI runs #22–#24 all failed at runner
-startup due to account-level Actions billing (payment failure / spending limit), not code.
+on-device. The Tinder viewport fix (`c8f9b55`) is now built: CI runs #22–#24 initially failed at
+runner startup due to account-level Actions **spending-limit quota** (not code); after the limit was
+raised, run #23 (commit `409b883`) went green and published a fresh `latest-debug` APK
+(sha256 `0228ffe4…`). **Next open item:** verify the Tinder portrait-gate fix on-device.
 
 ## Tech Stack
 
