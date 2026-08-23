@@ -21,7 +21,7 @@ Milestones 1–3 are implemented and validated on-device. This tree contains:
   (`device_bundle.js` + UA / UA-CH), SSL and external-scheme policy, downloads, and clear-session.
 - GitHub Actions CI: unit tests → lint → debug APK.
 
-**142 unit tests, 0 failures.** Build and iterate locally — see
+**191 unit tests, 0 failures.** Build and iterate locally — see
 [`docs/HANDOFF.md`](docs/HANDOFF.md) §6 for the toolchain, and
 [`docs/TROUBLESHOOTING_WEBVIEW.md`](docs/TROUBLESHOOTING_WEBVIEW.md) for diagnosing the WebView.
 

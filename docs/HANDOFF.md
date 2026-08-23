@@ -44,7 +44,7 @@ Native mode's browser identity was also made self-consistent with the device's r
 (commit `c4a52e5`), which closed the deferred `Sec-CH-UA` request-header gap along the way.
 
 **Builds are local now** — see [§6](#6-working-locally). A green gate is
-`./gradlew testDebugUnitTest lintDebug assembleDebug`: currently **142 tests, 0 failures**.
+`./gradlew testDebugUnitTest lintDebug assembleDebug`: currently **191 tests, 0 failures**.
 
 ## 3. Architecture at a glance (the non-obvious parts)
 
