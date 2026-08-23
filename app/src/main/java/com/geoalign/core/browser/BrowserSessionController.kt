@@ -49,6 +49,18 @@ data class BrowserSessionState(
      * `AndroidView` on this, so an increment releases the old WebView and constructs a new one.
      */
     val webViewGeneration: Int = 0,
+    /**
+     * New navigation is paused because the live alignment monitor is reporting a problem
+     * (issue #6). **Only new navigation.** The attached WebView is not stopped, blanked or
+     * destroyed while this is true — a user mid-form who loses their VPN must not also lose what
+     * they typed.
+     */
+    val navigationHeld: Boolean = false,
+    /**
+     * The url the user asked for while [navigationHeld] was true, waiting to be issued once the
+     * hold lifts. Holding onto it is the difference between "paused" and "swallowed".
+     */
+    val heldNavigation: String? = null,
 ) {
     /** Whether something is covering the page. Drives the first rung of the Back ladder. */
     val hasOverlay: Boolean
@@ -155,12 +167,18 @@ class BrowserSessionController(private val homeUrl: String) {
     private fun bind(id: Long) {
         val tab = _state.value.tabs.tabs.firstOrNull { it.id == id } ?: return
         val h = host
+        var deferred: String? = null
         if (h != null) {
             val snapshot = snapshots[id]
+            // A parked page is a document this tab already had; putting it back is not a new
+            // navigation and is never held. Only a fresh fetch is.
             val restored = snapshot != null && h.restoreState(snapshot)
-            if (!restored) h.loadUrl(tab.url)
+            if (!restored) {
+                if (_state.value.navigationHeld) deferred = tab.url else h.loadUrl(tab.url)
+            }
         }
         _state.value = _state.value.copy(
+            heldNavigation = deferred ?: _state.value.heldNavigation,
             attachedTabId = id,
             address = tab.url,
             // Reset the transient chrome; the callbacks repopulate it as the page settles.
@@ -179,9 +197,47 @@ class BrowserSessionController(private val homeUrl: String) {
         _state.value = _state.value.copy(address = text)
     }
 
+    /**
+     * Pause or resume *new* navigation (issue #6). Driven by the live alignment monitor through the
+     * pure `BrowserAlignmentGuard`; this method carries no judgement about when to pause.
+     *
+     * Holding touches nothing that is already loaded: no `stopLoading`, no `about:blank`, no
+     * `destroy`. The WebView keeps rendering, keeps its form state and keeps its history. Releasing
+     * issues whatever navigation was queued in the meantime, so a request made during the hold is
+     * deferred rather than discarded.
+     */
+    fun setNavigationHeld(held: Boolean) {
+        val current = _state.value
+        if (current.navigationHeld == held) return
+        if (held) {
+            _state.value = current.copy(navigationHeld = true)
+            return
+        }
+        val pending = current.heldNavigation
+        _state.value = current.copy(navigationHeld = false, heldNavigation = null)
+        pending?.let { load(it) }
+    }
+
+    /**
+     * A link tap inside the page, offered to the hold. Returns true when it was queued instead of
+     * followed, which the `WebViewClient` reports back as "consumed" so the page does not navigate.
+     */
+    fun holdLinkNavigation(url: String): Boolean {
+        if (!_state.value.navigationHeld) return false
+        _state.value = _state.value.copy(heldNavigation = url)
+        return true
+    }
+
     /** Normalise address-bar input and navigate. No-op for input that normalises to nothing. */
     fun load(text: String) {
         val url = UrlNormalizer.normalize(text) ?: return
+        if (_state.value.navigationHeld) {
+            // The address bar shows what was asked for, the tab still points at the page actually
+            // loaded, and the WebView is not touched. Updating the tab url here would rewrite the
+            // identity of a page the user is still reading.
+            _state.value = _state.value.copy(address = url, heldNavigation = url)
+            return
+        }
         _state.value = _state.value.copy(
             address = url,
             tabs = TabListReducer.updateTab(_state.value.tabs, _state.value.attachedTabId, url = url),
@@ -202,7 +258,21 @@ class BrowserSessionController(private val homeUrl: String) {
 
     fun reloadOrStop() {
         val h = host ?: return
-        if (_state.value.loading) h.stopLoading() else h.reload()
+        val current = _state.value
+        if (current.loading) {
+            // Stopping is always allowed — it is the one action that can only reduce what the
+            // network sees, and refusing it while held would be perverse.
+            h.stopLoading()
+            return
+        }
+        // A reload re-fetches the current document over whatever connection exists now, which is
+        // precisely the fetch the hold exists to prevent. Queued rather than refused, so the tap is
+        // not simply swallowed.
+        if (current.navigationHeld) {
+            _state.value = current.copy(heldNavigation = current.address)
+            return
+        }
+        h.reload()
     }
 
     /** Swap the emulated device on the live WebView and reload so the current page sees it. */
@@ -268,9 +338,15 @@ class BrowserSessionController(private val homeUrl: String) {
         _state.value = _state.value.copy(pageError = error, loading = false)
     }
 
-    /** "Retry" on the error page: load the same url again. */
+    /** "Retry" on the error page: load the same url again. Queued while navigation is held. */
     fun retry() {
         val error = _state.value.pageError ?: return
+        if (_state.value.navigationHeld) {
+            // The error card stays up: dismissing it would leave a blank view and imply the retry
+            // happened. It did not — it is waiting.
+            _state.value = _state.value.copy(heldNavigation = error.url)
+            return
+        }
         _state.value = _state.value.copy(pageError = null, address = error.url)
         host?.loadUrl(error.url)
     }
@@ -305,6 +381,25 @@ class BrowserSessionController(private val homeUrl: String) {
         return true
     }
 
+    /**
+     * Rebuild the WebView around a changed location profile (issue #6, "Re-match profile").
+     *
+     * The virtual environment is installed as a document-start script, so a page that has already
+     * loaded has already read the old one and cannot be un-told it. Re-matching therefore parks the
+     * current page, bumps the generation so the composable constructs a WebView configured from the
+     * new profile, and lets `attach` restore the parked page into it — which replays the load and
+     * runs the new bundle at document start.
+     *
+     * This is the one place the page is deliberately re-loaded, and it is not the pause: it happens
+     * only because the user explicitly asked to change what the browser is pretending to be. Doing
+     * nothing instead would leave a page running under a profile the app has just declared wrong
+     * while the indicator turned green over it.
+     */
+    fun rebuildWebView() {
+        persistAttached()
+        _state.value = _state.value.copy(webViewGeneration = _state.value.webViewGeneration + 1)
+    }
+
     /** "Reload" on the recovery card: build a fresh WebView and re-bind the active tab. */
     fun recoverFromRendererCrash() {
         val current = _state.value
@@ -325,13 +420,19 @@ class BrowserSessionController(private val homeUrl: String) {
         host?.clearBrowsingData()
         snapshots.clear()
         val fresh = TabsState.initial(homeUrl)
+        val held = _state.value.navigationHeld
         _state.value = BrowserSessionState(
             tabs = fresh,
             attachedTabId = fresh.activeId,
             address = homeUrl,
             webViewGeneration = _state.value.webViewGeneration,
+            // Wiping the session must not also wipe the reason new pages are paused. Rebuilding
+            // this value from scratch used to reset every field, and a `navigationHeld` that
+            // silently became false here would let the very next tap navigate unprotected.
+            navigationHeld = held,
+            heldNavigation = if (held) homeUrl else null,
         )
-        host?.loadUrl(homeUrl)
+        if (!held) host?.loadUrl(homeUrl)
     }
 
     /**
