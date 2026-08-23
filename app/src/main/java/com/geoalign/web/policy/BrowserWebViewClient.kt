@@ -33,6 +33,12 @@ class BrowserWebViewClient(
         { _, _, _, _ -> },
     /** The renderer process died. Must produce a recovery experience, not a blank view. */
     private val onRendererGone: (didCrash: Boolean) -> Unit = {},
+    /**
+     * `WebResourceErrorCompat.getDescription` is available on the installed WebView, from the one
+     * capability probe. Defaults false so a caller that does not pass it gets the safe answer rather
+     * than a description this WebView cannot produce.
+     */
+    private val canReadErrorDescription: Boolean = false,
 ) : WebViewClientCompat() {
 
     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
@@ -99,10 +105,10 @@ class BrowserWebViewClient(
         // `isForMainFrame` is the whole filter: this fires once per failing resource, so a page that
         // renders perfectly well can emit a handful of subframe failures, and turning any of those
         // into an error page would blank out a working page.
-        // The description is read defensively rather than behind a WebViewFeature query: it is
-        // decoration on the message, and no capability decision is made from it (PROJECT_CONTEXT —
-        // no surface re-queries WebViewFeature on its own).
-        val description = runCatching { error.description?.toString() }.getOrNull()
+        // getDescription throws on a WebView that does not implement it, so it is read only when the
+        // single capability probe said it is there. This used to be a runCatching, which was the
+        // last place in the browser that answered a capability question at the point of use.
+        val description = if (canReadErrorDescription) error.description?.toString() else null
         onLoadError(request.isForMainFrame, request.url.toString(), description)
     }
 

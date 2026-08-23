@@ -47,14 +47,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.geoalign.core.browser.BackAction
+import com.geoalign.core.browser.BrowserGateDecision
 import com.geoalign.core.browser.PageError
 import com.geoalign.core.browser.RendererGone
+import com.geoalign.core.browser.SitePrivacySheet
+import com.geoalign.core.browser.WebViewUpdatePlan
 import com.geoalign.core.device.DeviceProfile
 import com.geoalign.core.device.DeviceProfiles
 import com.geoalign.core.model.LocationProfile
 import com.geoalign.di.AppGraph
 import com.geoalign.web.config.AndroidWebViewCapabilityProbe
+import com.geoalign.web.config.AndroidWebViewUpdateLauncher
 import com.geoalign.web.config.WebViewConfigurator
+import com.geoalign.web.config.gateDecision
+import com.geoalign.web.config.supportedBrowserCapabilities
 import com.geoalign.web.download.AndroidDownloadEnqueuer
 import com.geoalign.web.policy.BrowserWebChromeClient
 import com.geoalign.web.policy.BrowserWebViewClient
@@ -91,6 +97,15 @@ fun BrowserScreen(onExit: () -> Unit) {
     // reads these answers rather than re-querying the platform.
     val capabilities = remember { AndroidWebViewCapabilityProbe(context).probe() }
     val configurator = remember(capabilities, deviceUa) { WebViewConfigurator(capabilities, deviceUa) }
+    // Required vs optional capabilities, decided by a pure table in core/. A missing *required*
+    // capability stops here: `WebViewConfigurator` would still hand back a working WebView, just one
+    // with no virtual environment installed, and browsing in that state is not what this app offers.
+    val gate = remember(capabilities) { capabilities.gateDecision() }
+
+    if (!gate.allowsAlignedBrowsing) {
+        CapabilityBlockCard(gate = gate, onExit = onExit)
+        return
+    }
 
     val profileState by vm.profileState.collectAsState()
     val session by vm.session.collectAsState()
@@ -131,21 +146,22 @@ fun BrowserScreen(onExit: () -> Unit) {
 
     if (showSiteInfo) {
         val host = session.address.substringAfter("://", session.address).substringBefore('/')
+        // Every line is derived from the capability facts and the live session. The sheet used to
+        // state "Location: virtual" on every device, including one whose WebView cannot inject a
+        // document-start script and therefore never received a virtual environment — no protection
+        // is reported active merely because it was requested.
+        val report = remember(host, device.displayName, capabilities) {
+            SitePrivacySheet.forSession(
+                host = host,
+                deviceLabel = device.displayName,
+                supported = capabilities.supportedBrowserCapabilities(),
+            )
+        }
         AlertDialog(
             onDismissRequest = { showSiteInfo = false },
             confirmButton = { TextButton(onClick = { showSiteInfo = false }) { Text("Close") } },
             title = { Text("Site & privacy") },
-            text = {
-                Text(
-                    "Site: ${host.ifBlank { "—" }}\n\n" +
-                        "• Location: virtual — pages see your profile's coordinates, not the device GPS.\n" +
-                        "• Camera & microphone: blocked for every site.\n" +
-                        "• Device: presenting as ${device.displayName}.\n" +
-                        "• Connections: HTTPS only; invalid certificates are refused.\n\n" +
-                        "This app does not operate the VPN and does not promise anonymity.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            },
+            text = { Text(report.text, style = MaterialTheme.typography.bodyMedium) },
         )
     }
 
@@ -255,7 +271,13 @@ fun BrowserScreen(onExit: () -> Unit) {
                 // counter is the composition key: bumping it releases the old view (destroying it and
                 // removing its scripts) and constructs a replacement.
                 key(session.webViewGeneration) {
-                    BrowserWebView(vm, configurator, activeProfile, device)
+                    BrowserWebView(
+                        vm = vm,
+                        configurator = configurator,
+                        activeProfile = activeProfile,
+                        device = device,
+                        canReadErrorDescription = capabilities.errorDescription,
+                    )
                 }
             } else {
                 RendererRecoveryCard(rendererGone, onReload = { vm.recoverFromRendererCrash() })
@@ -285,6 +307,7 @@ private fun BrowserWebView(
     configurator: WebViewConfigurator,
     activeProfile: LocationProfile,
     device: DeviceProfile,
+    canReadErrorDescription: Boolean,
 ) {
     // Survives recomposition inside this generation so `onRelease` can tear down the same host the
     // factory built.
@@ -324,6 +347,8 @@ private fun BrowserWebView(
                         // Returns true from the callback itself; returning false would kill the app
                         // process instead of recovering.
                         onRendererGone = { didCrash -> vm.onRenderProcessGone(didCrash) },
+                        // From the single probe, not a WebViewFeature query of its own.
+                        canReadErrorDescription = canReadErrorDescription,
                     )
                     webChromeClient = BrowserWebChromeClient(
                         onProgress = { vm.onProgress(it) },
@@ -344,6 +369,53 @@ private fun BrowserWebView(
             },
             onRelease = { hostHolder[0]?.let { vm.releaseWebView(it) } },
         )
+    }
+}
+
+/**
+ * The browser refusing to open, because a required WebView capability is missing.
+ *
+ * There is deliberately no "continue anyway": the only required capability is document-start
+ * injection, and without it the browser would present as aligned while pages read the device's real
+ * environment. The two things offered instead are the reason and a route to a newer WebView.
+ *
+ * Optional gaps are shown here too, clearly separated — they are why the browser is *not* blocked,
+ * and a user looking at this screen on a second device deserves to see the difference.
+ */
+@Composable
+private fun CapabilityBlockCard(gate: BrowserGateDecision, onExit: () -> Unit) {
+    val context = LocalContext.current
+    // Set only when neither the Play app nor the web listing could be opened — a sideloaded install
+    // on a device with no Play Store at all, which is an expected configuration here, not an error.
+    var updateFallback by remember { mutableStateOf<String?>(null) }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(gate.headline, style = MaterialTheme.typography.titleMedium)
+        Text(gate.reason, style = MaterialTheme.typography.bodyMedium)
+        Text(gate.installedWebViewLabel, style = MaterialTheme.typography.bodySmall)
+
+        gate.optionalNotice?.let { notice ->
+            Text("Also unavailable on this WebView:", style = MaterialTheme.typography.titleSmall)
+            Text(notice, style = MaterialTheme.typography.bodySmall)
+        }
+
+        updateFallback?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = {
+                    val outcome = AndroidWebViewUpdateLauncher(context).launch(gate.webViewPackageName)
+                    updateFallback = WebViewUpdatePlan.outcomeMessage(
+                        outcome,
+                        WebViewUpdatePlan.packageToUpdate(gate.webViewPackageName),
+                    )
+                },
+            ) { Text(WebViewUpdatePlan.OFFER_LABEL) }
+            OutlinedButton(onClick = onExit) { Text("Back") }
+        }
     }
 }
 
