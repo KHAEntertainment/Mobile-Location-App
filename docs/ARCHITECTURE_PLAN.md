@@ -133,7 +133,13 @@ Merged-manifest target (audited, not just declared):
 - `android.permission.ACCESS_NETWORK_STATE` — required (VPN transport detection).
 - `android.permission.POST_NOTIFICATIONS` — **omitted in MVP** unless a concrete notification feature lands; not needed for core flow.
 
-Explicitly absent (and asserted by an instrumentation test that reads the merged manifest): all location, wifi-state, bluetooth/nearby, activity-recognition, camera, microphone, contacts, phone-state, broad storage, and local-network permissions. Any transitive permission a library tries to merge in gets `tools:node="remove"`.
+Also present in the merged manifest, and expected: `<applicationId>.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`, a signature-level permission scoped to this app's own package that `androidx.core` merges in so it can register unexported runtime receivers. It grants nothing to any other app.
+
+Explicitly absent: all location, wifi-state, bluetooth/nearby, activity-recognition, camera, microphone, contacts, phone-state, broad storage, and local-network permissions. Any transitive permission a library tries to merge in gets `tools:node="remove"`.
+
+**`app/src/main/AndroidManifest.xml` is the authoritative list of exactly which permission names each of those categories covers.** This section names the categories; the manifest names the permissions, groups them under the same category headings, and carries a comment for each category deliberately *not* removed (`POST_NOTIFICATIONS`, the scoped `READ_MEDIA_*` trio). Deliberately not restated here, so the two cannot drift apart — which is what happened before: this list named ten categories while the manifest covered four.
+
+**Not yet asserted by a test.** An earlier draft of this section claimed an instrumentation test reads the merged manifest and asserts these absent. No such test exists, and there is no `app/src/androidTest` source set at all — the guarantee currently rests on the manifest alone. That assertion is M7 release-gate work; when it lands it must allow the two required permissions plus the `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` noted above.
 
 ---
 

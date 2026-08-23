@@ -167,6 +167,41 @@ class AlignmentCheckerTest {
         assertTrue(r.hasReason(AlignmentReason.CITY_UNVERIFIED))
         assertFalse(r.hasReason(AlignmentReason.COUNTRY_MISMATCH))
         assertEquals(AlignmentVerdict.ALIGNED, r.verdict)
+        // Nothing was compared, so nothing may be claimed as matched (issue #19).
+        assertEquals(MatchScope.NONE, r.matchedOn)
+    }
+
+    /**
+     * Issue #19. An estimate with neither label leaves both comparisons unrun; the coordinates
+     * still agree, so the verdict is ALIGNED — but `matchedOn` used to fall through to COUNTRY and
+     * claim a country match that never happened. Nothing was matched, and NONE says so.
+     */
+    @Test fun anExitWithNoLabelsMatchesNothing() {
+        val r = AlignmentChecker.check(profile(), exit(country = null, city = null), now)
+        assertEquals(AlignmentVerdict.ALIGNED, r.verdict)
+        assertEquals(MatchScope.NONE, r.matchedOn)
+        assertTrue(r.hasReason(AlignmentReason.COUNTRY_UNVERIFIED))
+        assertTrue(r.hasReason(AlignmentReason.CITY_UNVERIFIED))
+    }
+
+    /** The same, with no coordinates either — every check skipped, still not a country match. */
+    @Test fun anExitWithNoLabelsAndNoCoordinatesMatchesNothing() {
+        val r = AlignmentChecker.check(
+            profile(),
+            exit(country = null, city = null, lat = null, lon = null),
+            now,
+        )
+        assertEquals(AlignmentVerdict.ALIGNED, r.verdict)
+        assertEquals(MatchScope.NONE, r.matchedOn)
+        assertTrue(r.hasReason(AlignmentReason.EXIT_NO_COORDINATES))
+    }
+
+    /** A profile with no country still matches on city when both cities are present and agree. */
+    @Test fun cityMatchIsReportedEvenWhenCountryCouldNotBeCompared() {
+        val r = AlignmentChecker.check(profile(country = null), exit(), now)
+        assertEquals(AlignmentVerdict.ALIGNED, r.verdict)
+        assertEquals(MatchScope.CITY, r.matchedOn)
+        assertTrue(r.hasReason(AlignmentReason.COUNTRY_UNVERIFIED))
     }
 
     /** A hand-edited profile is a legitimate choice, but drift is still drift. */

@@ -80,6 +80,10 @@ interface ReadinessCopy {
             NoteId.IP_STACK_DIVERGENCE -> "IPv4 and IPv6 exit in different places — a possible leak."
             NoteId.DRIFT -> "Re-match to align the browser with where you're actually exiting."
             NoteId.STALE_CAPTURE -> "Re-match so the profile reflects your current exit."
+            NoteId.EXIT_IP_CHANGED ->
+                "Your connection is now exiting from a different address than when this was checked."
+            NoteId.UNABLE_TO_VERIFY ->
+                "Couldn't confirm your current exit. This is not a pass — check again before browsing."
             NoteId.STALE_EVALUATION -> "This reading is a few minutes old."
             NoteId.NO_PROFILE -> "Match the browser to your VPN to get started."
             NoteId.ERROR -> "Something went wrong while checking."

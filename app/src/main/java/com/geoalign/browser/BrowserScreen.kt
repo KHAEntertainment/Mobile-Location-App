@@ -1,14 +1,8 @@
 package com.geoalign.browser
 
-import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Bundle
-import android.os.Environment
-import android.webkit.CookieManager
-import android.webkit.URLUtil
-import android.webkit.WebStorage
 import android.webkit.WebView
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
@@ -33,15 +27,17 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,19 +45,20 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.webkit.ScriptHandler
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.geoalign.core.browser.BackAction
+import com.geoalign.core.browser.PageError
+import com.geoalign.core.browser.RendererGone
 import com.geoalign.core.device.DeviceProfile
 import com.geoalign.core.device.DeviceProfiles
 import com.geoalign.core.model.LocationProfile
-import com.geoalign.core.net.UrlNormalizer
-import com.geoalign.core.tabs.TabListReducer
-import com.geoalign.core.tabs.TabsState
 import com.geoalign.di.AppGraph
 import com.geoalign.web.config.AndroidWebViewCapabilityProbe
 import com.geoalign.web.config.WebViewConfigurator
+import com.geoalign.web.download.AndroidDownloadEnqueuer
 import com.geoalign.web.policy.BrowserWebChromeClient
 import com.geoalign.web.policy.BrowserWebViewClient
-import kotlinx.coroutines.launch
+import com.geoalign.web.session.AndroidWebViewHost
 
 private const val HOME_URL = "https://duckduckgo.com/"
 
@@ -70,12 +67,23 @@ private const val HOME_URL = "https://duckduckgo.com/"
  * §25). One hardened WebView with device emulation and per-tab state, plus: invalid-TLS refusal with
  * a visible warning, safe external-scheme hand-off, system-managed downloads, a clear-session action,
  * and a site-info sheet describing what the browser is and isn't protecting.
+ *
+ * This composable renders; it does not decide. Tabs, the attached tab and its parked pages, the
+ * address, progress, navigation enablement, load errors, renderer recovery and the device choice all
+ * live in [BrowserViewModel] / `BrowserSessionController`, where JVM tests can reach them. What is
+ * left here is the WebView construction the `AndroidView` factory has to own, plus the menus and
+ * dialogs, which are genuinely view state.
  */
 @Composable
 fun BrowserScreen(onExit: () -> Unit) {
     val context = LocalContext.current
-    val store = remember { AppGraph.profileStore(context) }
-    val scope = rememberCoroutineScope()
+    val vm: BrowserViewModel = viewModel(
+        factory = BrowserViewModel.Factory(
+            store = AppGraph.profileStore(context),
+            downloadEnqueuer = AndroidDownloadEnqueuer(context),
+            homeUrl = HOME_URL,
+        ),
+    )
     // The real WebView UA, captured once. "This device" mode serves a cleaned (de-WebView-ified)
     // version so pages see a genuine Chrome rather than an embedded WebView.
     val deviceUa = remember { android.webkit.WebSettings.getDefaultUserAgent(context) }
@@ -84,18 +92,14 @@ fun BrowserScreen(onExit: () -> Unit) {
     val capabilities = remember { AndroidWebViewCapabilityProbe(context).probe() }
     val configurator = remember(capabilities, deviceUa) { WebViewConfigurator(capabilities, deviceUa) }
 
-    var profile by remember { mutableStateOf<LocationProfile?>(null) }
-    var loaded by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        profile = store.list().firstOrNull()
-        loaded = true
-    }
+    val profileState by vm.profileState.collectAsState()
+    val session by vm.session.collectAsState()
 
-    if (!loaded) {
+    if (!profileState.loaded) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
     }
-    val activeProfile = profile
+    val activeProfile = profileState.profile
     if (activeProfile == null) {
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("No location profile selected.", style = MaterialTheme.typography.titleMedium)
@@ -104,114 +108,29 @@ fun BrowserScreen(onExit: () -> Unit) {
         }
         return
     }
+    val device = profileState.device ?: DeviceProfiles.forProfile(activeProfile)
 
-    var webView by remember { mutableStateOf<WebView?>(null) }
-    var deviceScript by remember { mutableStateOf<ScriptHandler?>(null) }
-    var device by remember { mutableStateOf(DeviceProfiles.forProfile(activeProfile)) }
     var deviceMenuOpen by remember { mutableStateOf(false) }
     var overflowOpen by remember { mutableStateOf(false) }
     var showSiteInfo by remember { mutableStateOf(false) }
-    var sslWarning by remember { mutableStateOf<String?>(null) }
 
-    var tabs by remember { mutableStateOf(TabsState.initial(HOME_URL)) }
-    // The tab whose page is currently loaded into the single WebView. Kept in sync with tabs.activeId
-    // through the swap helpers below.
-    var attachedTabId by remember { mutableStateOf(tabs.activeId) }
-    val savedStates = remember { mutableMapOf<Long, Bundle>() }
-
-    var address by remember { mutableStateOf(HOME_URL) }
-    var progress by remember { mutableStateOf(0) }
-    var loadingPage by remember { mutableStateOf(false) }
-    var canBack by remember { mutableStateOf(false) }
-    var canForward by remember { mutableStateOf(false) }
-
-    // Park the WebView's current page under the attached tab so it can be restored later.
-    fun persistAttached() {
-        val wv = webView ?: return
-        val b = Bundle()
-        if (wv.saveState(b) != null) savedStates[attachedTabId] = b
+    // Leaving the browser destroys the WebView and removes the document-start scripts it registered.
+    // Before this existed there was no `WebView.destroy()` anywhere in the tree.
+    DisposableEffect(Unit) {
+        onDispose { vm.disposeWebView() }
     }
 
-    // Load the given tab into the WebView: restore its parked page, or fetch its url fresh.
-    fun bindTabToWebView(id: Long) {
-        val wv = webView ?: return
-        val tab = tabs.tabs.firstOrNull { it.id == id } ?: return
-        val saved = savedStates[id]
-        if (saved != null) wv.restoreState(saved) else wv.loadUrl(tab.url)
-        attachedTabId = id
-        address = tab.url
-        // Reset the transient chrome; the callbacks will repopulate as the page settles.
-        progress = 0
-        loadingPage = false
-        canBack = wv.canGoBack()
-        canForward = wv.canGoForward()
+    // Back is always handled here now. It used to be `enabled = canBack`, so Back at the first page
+    // of the first tab fell through to the Activity and dropped the user out of the app mid-session.
+    // The ladder — dismiss an overlay, then go back, then close a tab, then leave — is decided by
+    // `BackPolicy` and unit-tested; only the last rung is ours, because only this screen knows what
+    // leaving means.
+    BackHandler {
+        if (vm.onBack() == BackAction.LEAVE_BROWSER) onExit()
     }
-
-    fun switchTo(id: Long) {
-        if (id == tabs.activeId) return
-        persistAttached()
-        tabs = TabListReducer.selectTab(tabs, id)
-        bindTabToWebView(tabs.activeId)
-    }
-
-    fun openNewTab() {
-        persistAttached()
-        tabs = TabListReducer.openTab(tabs, HOME_URL)
-        // A brand-new tab has no parked state, so this loads HOME_URL fresh.
-        bindTabToWebView(tabs.activeId)
-    }
-
-    fun closeTab(id: Long) {
-        val wasActive = id == tabs.activeId
-        tabs = TabListReducer.closeTab(tabs, id, HOME_URL)
-        savedStates.remove(id)
-        if (wasActive) bindTabToWebView(tabs.activeId)
-    }
-
-    fun load(text: String) {
-        val url = UrlNormalizer.normalize(text) ?: return
-        address = url
-        tabs = TabListReducer.updateTab(tabs, attachedTabId, url = url)
-        webView?.loadUrl(url)
-    }
-
-    // Switch the emulated device live: the configurator swaps the UA string, the client hints and
-    // the injected device bundle; reload so the current page sees them, and persist the choice back
-    // to the active profile so it sticks next session.
-    fun changeDevice(newDevice: DeviceProfile) {
-        deviceMenuOpen = false
-        if (newDevice.id == device.id) return
-        device = newDevice
-        webView?.let { wv ->
-            deviceScript = configurator.applyDevice(wv, newDevice, deviceScript)
-            wv.reload()
-        }
-        scope.launch {
-            runCatching { store.upsert(activeProfile.copy(userAgentProfileId = newDevice.id)) }
-        }
-    }
-
-    // Wipe browsing state: cookies, web storage, cache, form data, history — then reset to one fresh
-    // home tab (spec §25 "clear session"). Does not touch the saved location/device profile.
-    fun clearSession() {
-        overflowOpen = false
-        CookieManager.getInstance().removeAllCookies(null)
-        CookieManager.getInstance().flush()
-        WebStorage.getInstance().deleteAllData()
-        webView?.clearCache(true)
-        webView?.clearFormData()
-        webView?.clearHistory()
-        savedStates.clear()
-        tabs = TabsState.initial(HOME_URL)
-        attachedTabId = tabs.activeId
-        address = HOME_URL
-        webView?.loadUrl(HOME_URL)
-    }
-
-    BackHandler(enabled = canBack) { webView?.goBack() }
 
     if (showSiteInfo) {
-        val host = address.substringAfter("://", address).substringBefore('/')
+        val host = session.address.substringAfter("://", session.address).substringBefore('/')
         AlertDialog(
             onDismissRequest = { showSiteInfo = false },
             confirmButton = { TextButton(onClick = { showSiteInfo = false }) { Text("Close") } },
@@ -237,20 +156,20 @@ fun BrowserScreen(onExit: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            tabs.tabs.forEach { tab ->
+            session.tabs.tabs.forEach { tab ->
                 FilterChip(
-                    selected = tab.id == tabs.activeId,
-                    onClick = { switchTo(tab.id) },
+                    selected = tab.id == session.tabs.activeId,
+                    onClick = { vm.switchTo(tab.id) },
                     label = { Text(tabLabel(tab.title, tab.url), maxLines = 1) },
                     trailingIcon = {
                         TextButton(
-                            onClick = { closeTab(tab.id) },
+                            onClick = { vm.closeTab(tab.id) },
                             contentPadding = PaddingValues(0.dp),
                         ) { Text("×") }
                     },
                 )
             }
-            TextButton(onClick = { openNewTab() }) { Text("+") }
+            TextButton(onClick = { vm.openNewTab() }) { Text("+") }
         }
 
         Row(
@@ -258,12 +177,12 @@ fun BrowserScreen(onExit: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = { webView?.goBack() }, enabled = canBack) { Text("‹") }
-            TextButton(onClick = { webView?.goForward() }, enabled = canForward) { Text("›") }
-            TextButton(onClick = { if (loadingPage) webView?.stopLoading() else webView?.reload() }) {
-                Text(if (loadingPage) "✕" else "⟳")
+            TextButton(onClick = { vm.goBack() }, enabled = session.canGoBack) { Text("‹") }
+            TextButton(onClick = { vm.goForward() }, enabled = session.canGoForward) { Text("›") }
+            TextButton(onClick = { vm.reloadOrStop() }) {
+                Text(if (session.loading) "✕" else "⟳")
             }
-            TextButton(onClick = { load(HOME_URL) }) { Text("⌂") }
+            TextButton(onClick = { vm.goHome() }) { Text("⌂") }
 
             Box {
                 TextButton(onClick = { deviceMenuOpen = true }) { Text("Device") }
@@ -271,7 +190,7 @@ fun BrowserScreen(onExit: () -> Unit) {
                     DeviceProfiles.ALL.forEach { d ->
                         DropdownMenuItem(
                             text = { Text((if (d.id == device.id) "✓ " else "") + d.displayName) },
-                            onClick = { changeDevice(d) },
+                            onClick = { deviceMenuOpen = false; vm.selectDevice(d) },
                         )
                     }
                 }
@@ -286,7 +205,7 @@ fun BrowserScreen(onExit: () -> Unit) {
                     )
                     DropdownMenuItem(
                         text = { Text("Clear session") },
-                        onClick = { clearSession() },
+                        onClick = { overflowOpen = false; vm.clearSession() },
                     )
                 }
             }
@@ -295,16 +214,16 @@ fun BrowserScreen(onExit: () -> Unit) {
         }
 
         OutlinedTextField(
-            value = address,
-            onValueChange = { address = it },
+            value = session.address,
+            onValueChange = { vm.editAddress(it) },
             label = { Text("Address") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-            keyboardActions = KeyboardActions(onGo = { load(address) }),
+            keyboardActions = KeyboardActions(onGo = { vm.load(session.address) }),
         )
 
-        sslWarning?.let { msg ->
+        session.sslWarning?.let { msg ->
             Card(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
@@ -320,15 +239,57 @@ fun BrowserScreen(onExit: () -> Unit) {
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         modifier = Modifier.fillMaxWidth(0.8f),
                     )
-                    TextButton(onClick = { sslWarning = null }) { Text("Dismiss") }
+                    TextButton(onClick = { vm.dismissSslWarning() }) { Text("Dismiss") }
                 }
             }
         }
 
-        if (loadingPage && progress in 1..99) {
-            LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
+        if (session.loading && session.progress in 1..99) {
+            LinearProgressIndicator(progress = { session.progress / 100f }, modifier = Modifier.fillMaxWidth())
         }
 
+        Box(Modifier.fillMaxSize()) {
+            val rendererGone = session.rendererGone
+            if (rendererGone == null) {
+                // A dead renderer can only be recovered by building a new WebView, so the generation
+                // counter is the composition key: bumping it releases the old view (destroying it and
+                // removing its scripts) and constructs a replacement.
+                key(session.webViewGeneration) {
+                    BrowserWebView(vm, configurator, activeProfile, device)
+                }
+            } else {
+                RendererRecoveryCard(rendererGone, onReload = { vm.recoverFromRendererCrash() })
+            }
+
+            // Main-frame failures only — a subframe failure never gets here, so a broken tracking
+            // pixel or a 404 iframe cannot blank out a page that is otherwise fine.
+            session.pageError?.let { error ->
+                PageErrorCard(
+                    error = error,
+                    onRetry = { vm.retry() },
+                    onOpenExternally = { openExternally(context, error.url) },
+                    onDismiss = { vm.dismissPageError() },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The WebView itself. Constructed once per WebView generation and handed to the ViewModel as an
+ * `AndroidWebViewHost`; released — and destroyed — when it leaves the composition.
+ */
+@Composable
+private fun BrowserWebView(
+    vm: BrowserViewModel,
+    configurator: WebViewConfigurator,
+    activeProfile: LocationProfile,
+    device: DeviceProfile,
+) {
+    // Survives recomposition inside this generation so `onRelease` can tear down the same host the
+    // factory built.
+    val hostHolder = remember { arrayOfNulls<AndroidWebViewHost>(1) }
+    Box(Modifier.fillMaxSize()) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
@@ -344,40 +305,84 @@ fun BrowserScreen(onExit: () -> Unit) {
                         android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                     )
                     // Settings matrix, user-agent + client hints, safe browsing and both
-                    // document-start bundles. Runs before the first loadUrl below, which is the
+                    // document-start bundles. Runs before the first load below, which is the
                     // only ordering in which the bundles beat the page's own scripts.
-                    deviceScript = configurator.configure(this, activeProfile, device).device
+                    val installed = configurator.configure(this, activeProfile, device)
 
                     webViewClient = BrowserWebViewClient(
                         onNav = { url, back, forward, loading ->
-                            canBack = back
-                            canForward = forward
-                            loadingPage = loading
-                            if (url != null) {
-                                address = url
-                                tabs = TabListReducer.updateTab(tabs, attachedTabId, url = url)
-                            }
+                            vm.onNavigationStateChanged(url, back, forward, loading)
                         },
                         onExternal = { url -> openExternally(ctx, url) },
-                        onSslError = { host ->
-                            sslWarning = "Refused an insecure connection to $host — the site's security " +
-                                "certificate could not be trusted."
+                        onSslError = { host -> vm.onSslError(host) },
+                        onLoadError = { mainFrame, url, description ->
+                            vm.onLoadError(mainFrame, url, description)
                         },
+                        onHttpError = { mainFrame, url, status, reason ->
+                            vm.onHttpError(mainFrame, url, status, reason)
+                        },
+                        // Returns true from the callback itself; returning false would kill the app
+                        // process instead of recovering.
+                        onRendererGone = { didCrash -> vm.onRenderProcessGone(didCrash) },
                     )
                     webChromeClient = BrowserWebChromeClient(
-                        onProgress = { progress = it },
-                        onTitle = { title -> tabs = TabListReducer.updateTab(tabs, attachedTabId, title = title) },
+                        onProgress = { vm.onProgress(it) },
+                        onTitle = { title -> vm.onTitle(title) },
                     )
 
                     // Hand downloads to Android's DownloadManager instead of trying to render them.
                     setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-                        enqueueDownload(ctx, url, userAgent, contentDisposition, mimeType)
+                        vm.onDownloadRequested(url, userAgent, contentDisposition, mimeType)
                     }
 
-                    loadUrl(HOME_URL)
-                }.also { webView = it }
+                    // The controller decides what this WebView loads: a returning tab gets its
+                    // parked page restored, a fresh one gets its url.
+                    val host = AndroidWebViewHost(this, configurator, installed.environment, installed.device)
+                    hostHolder[0] = host
+                    vm.attachWebView(host)
+                }
             },
+            onRelease = { hostHolder[0]?.let { vm.releaseWebView(it) } },
         )
+    }
+}
+
+/** Main-frame load failure: what happened, and the two ways out of it. */
+@Composable
+private fun PageErrorCard(
+    error: PageError,
+    onRetry: () -> Unit,
+    onOpenExternally: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(error.headline, style = MaterialTheme.typography.titleMedium)
+        Text(error.detail, style = MaterialTheme.typography.bodyMedium)
+        Text(error.url, style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = onRetry) { Text("Retry") }
+            if (error.canOpenExternally) {
+                OutlinedButton(onClick = onOpenExternally) { Text("Open externally") }
+            }
+            TextButton(onClick = onDismiss) { Text("Dismiss") }
+        }
+    }
+}
+
+/** The renderer died. Recovery, rather than the blank view the user would otherwise be left with. */
+@Composable
+private fun RendererRecoveryCard(state: RendererGone, onReload: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(state.headline, style = MaterialTheme.typography.titleMedium)
+        Text(state.detail, style = MaterialTheme.typography.bodyMedium)
+        Text(state.url, style = MaterialTheme.typography.bodySmall)
+        Button(onClick = onReload) { Text("Reload page") }
     }
 }
 
@@ -386,29 +391,6 @@ private fun openExternally(context: Context, url: String) {
     runCatching {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
-    }
-}
-
-/** Route an http(s) download to Android's DownloadManager (public Downloads dir). */
-private fun enqueueDownload(
-    context: Context,
-    url: String,
-    userAgent: String?,
-    contentDisposition: String?,
-    mimeType: String?,
-) {
-    if (!url.startsWith("http")) return
-    runCatching {
-        val request = DownloadManager.Request(Uri.parse(url)).apply {
-            setMimeType(mimeType)
-            userAgent?.let { addRequestHeader("User-Agent", it) }
-            val name = URLUtil.guessFileName(url, contentDisposition, mimeType)
-            setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
-            setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            setDescription("GeoAlign download")
-        }
-        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        dm.enqueue(request)
     }
 }
 
