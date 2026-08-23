@@ -9,7 +9,10 @@ location signals (geolocation, timezone, locale, user-agent identity) with the a
 already-running, user-operated VPN. It does **not** implement a VPN, does **not** change Android's
 system GPS, and makes no anonymity guarantee.
 
-Current status: **Milestone 1 (proofs of concept)**.
+Current status: **Milestones 1–3 implemented** (POCs, data foundation, browser) and validated
+on-device. Last green CI build = **#21, commit `24fb4c7`** ("This device" native mode). The Tinder
+viewport fix (`c8f9b55`) is committed but **never built** — CI runs #22–#24 all failed at runner
+startup due to account-level Actions billing (payment failure / spending limit), not code.
 
 ## Tech Stack
 
@@ -92,7 +95,8 @@ All HTTPS, keyless by default:
 
 ## Documentation Map
 
-- `README.md` — overview, build instructions, toolchain versions, permission policy
+- `docs/HANDOFF.md` — **start here**: session handoff with status, decision log, war stories, prioritized next steps (upstream `main` @ `6186412`; sync local clone to get it)
+- `README.md` — overview, build instructions, toolchain versions, permission policy (⚠ its Status section is stale — says "Milestone 1")
 - `docs/ARCHITECTURE_PLAN.md` — full plan: milestones, proposed 6-module split of ~19 spec modules, SDK/provider rationale
 - `docs/VALIDATION_M1.md` — adversarial security review (12 findings/dispositions)
 - `docs/POC_NOTES.md` — what each POC 1–5 verifies
