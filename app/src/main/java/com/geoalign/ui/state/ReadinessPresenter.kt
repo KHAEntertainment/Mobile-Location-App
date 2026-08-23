@@ -5,6 +5,8 @@ import com.geoalign.core.alignment.AlignmentResult
 import com.geoalign.core.alignment.AlignmentThresholds
 import com.geoalign.core.alignment.AlignmentVerdict
 import com.geoalign.core.model.LocationProfile
+import com.geoalign.core.monitor.AlignmentMonitorState
+import com.geoalign.core.monitor.MonitorStatus
 import com.geoalign.core.readiness.ReadinessLevel
 import com.geoalign.core.readiness.StepState
 import com.geoalign.core.readiness.VpnTransport
@@ -26,6 +28,13 @@ data class ReadinessPresentationInput(
      * VpnStatusRepository.transportUpdates() later is a change to the screen only.
      */
     val liveVpn: VpnTransport? = null,
+    /**
+     * The live monitor's own verdict, when one is running. It is not a second opinion on alignment
+     * — the monitor and this presenter both defer to [AlignmentChecker] — it carries what a
+     * single-shot evaluation structurally cannot know: that the exit address moved, or that the
+     * last check failed outright. Null means no monitor, and the cached evaluation stands alone.
+     */
+    val liveMonitor: AlignmentMonitorState? = null,
 )
 
 data class PresentationThresholds(
@@ -76,13 +85,20 @@ object ReadinessPresenter {
 
         val notes = buildNotes(input, eval, alignment, vpnDroppedLive, staleEvaluation, copy)
 
+        // A monitor that is anything other than aligned withholds the green check even when the
+        // cached evaluation looks perfect. UNABLE_TO_VERIFY is the case that matters: a check that
+        // could not be completed is not a check that passed, and the strongest claim this app makes
+        // must never rest on evidence that failed to arrive.
+        val monitorAligned = input.liveMonitor == null || input.liveMonitor.isAligned
+
         val verified = input.phase == LoadPhase.LOADED &&
             level == ReadinessLevel.READY &&
             alignment.verdict == AlignmentVerdict.ALIGNED &&
             vpn == VpnTransport.DETECTED &&
             !staleEvaluation &&
             !input.userAcceptedNoVpn &&
-            !vpnDroppedLive
+            !vpnDroppedLive &&
+            monitorAligned
 
         val blocked = input.phase != LoadPhase.INITIAL &&
             (vpnDroppedLive || (level == ReadinessLevel.BLOCKED_NO_VPN && !busy))
@@ -255,6 +271,18 @@ object ReadinessPresenter {
             AlignmentVerdict.DRIFTED_CITY,
             AlignmentVerdict.DRIFTED_DISTANCE -> add(NoteId.DRIFT, StatusTone.ATTENTION)
             AlignmentVerdict.STALE_CAPTURE -> add(NoteId.STALE_CAPTURE, StatusTone.ATTENTION)
+            else -> Unit
+        }
+
+        when (input.liveMonitor?.status) {
+            MonitorStatus.EXIT_IP_CHANGED -> add(NoteId.EXIT_IP_CHANGED, StatusTone.ATTENTION)
+            // Only when nothing else already said why. The reducer's own geolocation and IP
+            // warnings are more specific, and stacking a general "couldn't verify" underneath one
+            // of them says the same thing twice.
+            MonitorStatus.UNABLE_TO_VERIFY ->
+                if (none { it.id == NoteId.GEO_FAILED || it.id == NoteId.IP_UNVERIFIED }) {
+                    add(NoteId.UNABLE_TO_VERIFY, StatusTone.ATTENTION)
+                }
             else -> Unit
         }
 
