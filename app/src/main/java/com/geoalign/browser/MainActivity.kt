@@ -102,7 +102,7 @@ private fun PocWebView(modifier: Modifier) {
                     allowFileAccessFromFileURLs = false
                     @Suppress("DEPRECATION")
                     allowUniversalAccessFromFileURLs = false
-                    // Explicitly refuse mixed content (plan §21). Cleartext is also blocked at the
+                    // Explicitly refuse mixed content (spec §21). Cleartext is also blocked at the
                     // manifest level (usesCleartextTraffic=false); set here to remove the discrepancy.
                     mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
                 }

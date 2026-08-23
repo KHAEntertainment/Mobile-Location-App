@@ -5,7 +5,7 @@ import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
 
 /**
- * POC 6 / §17–18 — a single, centralized permission decision point instead of scattered
+ * POC 6 / spec §17–18 — a single, centralized permission decision point instead of scattered
  * WebView callbacks. MVP defaults deny every sensitive browser capability:
  *
  *  - Camera / microphone / audio / video capture  → denied (prevents WebRTC media + getUserMedia)
