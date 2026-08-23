@@ -60,7 +60,10 @@ data class AlignmentResult(
     val exitCity: String?,
     /** Null when either side lacks coordinates. */
     val distanceKm: Double?,
-    /** How stale the estimate was when the profile was written. Null if provenance is absent. */
+    /**
+     * How stale the estimate was at the moment the profile was minted from it. Null if provenance
+     * is absent.
+     */
     val captureLagMillis: Long?,
 ) {
     val isAligned: Boolean get() = verdict == AlignmentVerdict.ALIGNED
@@ -106,8 +109,13 @@ object AlignmentChecker {
         val eCountry = normalizeCountry(exit?.countryCode)
         val eCity = normalizeCity(exit?.city)
 
+        // Measured against createdAtMillis, not updatedAtMillis. Both are the capture moment for a
+        // freshly matched profile, but editing a profile bumps updatedAtMillis while leaving the
+        // source timestamp alone — using it would report a profile the user just deliberately
+        // edited as "saved from an out-of-date estimate". createdAtMillis survives edits, so it
+        // stays the moment the estimate was actually turned into a profile.
         val captureLag = profile.sourceApproxTimestampMillis
-            ?.let { profile.updatedAtMillis - it }
+            ?.let { profile.createdAtMillis - it }
             ?.coerceAtLeast(0L)
 
         // A manually-entered profile is a legitimate choice, not an error — but a manual profile

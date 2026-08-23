@@ -1,17 +1,11 @@
 package com.geoalign.browser
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -28,6 +22,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.geoalign.core.model.LocationProfile
 import com.geoalign.di.AppGraph
+import com.geoalign.ui.components.AppScaffold
+import com.geoalign.ui.components.PrimaryAction
+import com.geoalign.ui.components.SecondaryAction
+import com.geoalign.ui.components.SecondaryActionRow
+import com.geoalign.ui.theme.Spacing
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -45,6 +44,12 @@ fun ProfileEditor(onDone: () -> Unit) {
     var loaded by remember { mutableStateOf(false) }
     var existingId by remember { mutableStateOf<String?>(null) }
     var createdAt by remember { mutableStateOf(0L) }
+    // Provenance is carried through rather than reset. AlignmentChecker reads these to tell a
+    // profile matched from a live estimate apart from a hand-entered one, and to detect a profile
+    // minted from an already-stale observation. Dropping them on edit would blind that check.
+    var generatedFromIp by remember { mutableStateOf(false) }
+    var sourceProvider by remember { mutableStateOf<String?>(null) }
+    var sourceApproxAt by remember { mutableStateOf<Long?>(null) }
 
     var name by remember { mutableStateOf("") }
     var lat by remember { mutableStateOf("") }
@@ -62,6 +67,9 @@ fun ProfileEditor(onDone: () -> Unit) {
         store.list().firstOrNull()?.let { p ->
             existingId = p.id
             createdAt = p.createdAtMillis
+            generatedFromIp = p.generatedFromIp
+            sourceProvider = p.sourceProvider
+            sourceApproxAt = p.sourceApproxTimestampMillis
             name = p.name
             lat = p.latitude.toString()
             lng = p.longitude.toString()
@@ -83,74 +91,77 @@ fun ProfileEditor(onDone: () -> Unit) {
         lngD != null && lngD in -180.0..180.0 &&
         name.isNotBlank() && timezone.isNotBlank()
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+    AppScaffold(
+        title = "Edit profile",
+        onBack = onDone,
+        contentSpacing = Spacing.md,
     ) {
-        Text("Edit profile", style = MaterialTheme.typography.titleLarge)
-
         if (!loaded) {
             CircularProgressIndicator()
-            return@Column
+        } else {
+            Field("Name", name) { name = it }
+            Field("Latitude (-90..90)", lat, isError = latD == null || latD !in -90.0..90.0) { lat = it }
+            Field("Longitude (-180..180)", lng, isError = lngD == null || lngD !in -180.0..180.0) { lng = it }
+            Field("Accuracy (meters)", accuracy) { accuracy = it }
+            Field("City", city) { city = it }
+            Field("Region", region) { region = it }
+            Field("Country code (ISO-2)", country) { country = it }
+            Field("Timezone (IANA, e.g. Europe/London)", timezone, isError = timezone.isBlank()) { timezone = it }
+            Field("Primary locale (e.g. en-GB)", locale) { locale = it }
+            Field("Languages (comma-separated)", languages) { languages = it }
+
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                Text("Desktop mode", style = MaterialTheme.typography.bodyMedium)
+                Switch(checked = desktop, onCheckedChange = { desktop = it })
+            }
+
+            SecondaryActionRow {
+                PrimaryAction(
+                    text = "Save",
+                    enabled = valid,
+                    modifier = Modifier.weight(1f),
+                    onClick = {
+                        scope.launch {
+                            val now = System.currentTimeMillis()
+                            val profile = LocationProfile(
+                                id = existingId ?: UUID.randomUUID().toString(),
+                                name = name.trim(),
+                                countryCode = country.trim().ifBlank { null },
+                                region = region.trim().ifBlank { null },
+                                city = city.trim().ifBlank { null },
+                                latitude = latD!!,
+                                longitude = lngD!!,
+                                accuracyMeters = accuracy.toDoubleOrNull() ?: LocationProfile.DEFAULT_ACCURACY_M,
+                                timezone = timezone.trim(),
+                                primaryLocale = locale.trim().ifBlank { "en" },
+                                languages = languages.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                                    .ifEmpty { listOf("en") },
+                                desktopMode = desktop,
+                                createdAtMillis = if (existingId != null) createdAt else now,
+                                updatedAtMillis = now,
+                                generatedFromIp = generatedFromIp,
+                                sourceProvider = sourceProvider,
+                                sourceApproxTimestampMillis = sourceApproxAt,
+                            )
+                            store.clear()
+                            store.upsert(profile)
+                            onDone()
+                        }
+                    },
+                )
+                SecondaryAction(
+                    text = "Cancel",
+                    modifier = Modifier.weight(1f),
+                    onClick = onDone,
+                )
+            }
+
+            Text(
+                "Changing location on an existing profile can conflict with cookies or account history " +
+                    "saved under it. Clear browser data if you switch regions.",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
-
-        Field("Name", name) { name = it }
-        Field("Latitude (-90..90)", lat, isError = latD == null || latD !in -90.0..90.0) { lat = it }
-        Field("Longitude (-180..180)", lng, isError = lngD == null || lngD !in -180.0..180.0) { lng = it }
-        Field("Accuracy (meters)", accuracy) { accuracy = it }
-        Field("City", city) { city = it }
-        Field("Region", region) { region = it }
-        Field("Country code (ISO-2)", country) { country = it }
-        Field("Timezone (IANA, e.g. Europe/London)", timezone, isError = timezone.isBlank()) { timezone = it }
-        Field("Primary locale (e.g. en-GB)", locale) { locale = it }
-        Field("Languages (comma-separated)", languages) { languages = it }
-
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Desktop mode", style = MaterialTheme.typography.bodyMedium)
-            Switch(checked = desktop, onCheckedChange = { desktop = it })
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(
-                enabled = valid,
-                onClick = {
-                    scope.launch {
-                        val now = System.currentTimeMillis()
-                        val profile = LocationProfile(
-                            id = existingId ?: UUID.randomUUID().toString(),
-                            name = name.trim(),
-                            countryCode = country.trim().ifBlank { null },
-                            region = region.trim().ifBlank { null },
-                            city = city.trim().ifBlank { null },
-                            latitude = latD!!,
-                            longitude = lngD!!,
-                            accuracyMeters = accuracy.toDoubleOrNull() ?: LocationProfile.DEFAULT_ACCURACY_M,
-                            timezone = timezone.trim(),
-                            primaryLocale = locale.trim().ifBlank { "en" },
-                            languages = languages.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-                                .ifEmpty { listOf("en") },
-                            desktopMode = desktop,
-                            createdAtMillis = if (existingId != null) createdAt else now,
-                            updatedAtMillis = now,
-                            generatedFromIp = false,
-                        )
-                        store.clear()
-                        store.upsert(profile)
-                        onDone()
-                    }
-                },
-            ) { Text("Save") }
-            OutlinedButton(onClick = onDone) { Text("Cancel") }
-        }
-
-        Text(
-            "Changing location on an existing profile can conflict with cookies or account history " +
-                "saved under it. Clear browser data if you switch regions.",
-            style = MaterialTheme.typography.bodySmall,
-        )
     }
 }
 

@@ -18,6 +18,7 @@ class AlignmentCheckerTest {
         lat: Double = 6.5244,
         lon: Double = 3.3792,
         generatedFromIp: Boolean = true,
+        createdAt: Long = now,
         updatedAt: Long = now,
         sourceAt: Long? = now,
     ) = LocationProfile(
@@ -30,7 +31,7 @@ class AlignmentCheckerTest {
         timezone = "Africa/Lagos",
         primaryLocale = "en-NG",
         languages = listOf("en-NG", "en"),
-        createdAtMillis = updatedAt,
+        createdAtMillis = createdAt,
         updatedAtMillis = updatedAt,
         generatedFromIp = generatedFromIp,
         sourceApproxTimestampMillis = sourceAt,
@@ -127,12 +128,24 @@ class AlignmentCheckerTest {
      * the estimate was already 759s old when the profile was written, so the agreement is luck.
      */
     @Test fun staleCaptureIsNotAlignedEvenWhenLabelsMatch() {
-        val p = profile(updatedAt = now, sourceAt = now - 759_000L)
+        val p = profile(createdAt = now, sourceAt = now - 759_000L)
         val r = AlignmentChecker.check(p, exit(), now)
         assertEquals(AlignmentVerdict.STALE_CAPTURE, r.verdict)
         assertTrue(r.hasReason(AlignmentReason.PROFILE_CAPTURED_FROM_STALE_ESTIMATE))
         assertEquals(759_000L, r.captureLagMillis)
         assertFalse(r.isAligned)
+    }
+
+    /**
+     * Editing a profile bumps updatedAtMillis but does not re-capture the estimate. Measuring the
+     * lag against updatedAtMillis would report every edited profile as stale within two minutes of
+     * being saved.
+     */
+    @Test fun editingAProfileDoesNotMakeItLookStale() {
+        val p = profile(createdAt = now, updatedAt = now + 489_000L, sourceAt = now)
+        val r = AlignmentChecker.check(p, exit(), now + 489_000L)
+        assertEquals(AlignmentVerdict.ALIGNED, r.verdict)
+        assertEquals(0L, r.captureLagMillis)
     }
 
     @Test fun staleCaptureBoundaryIsExclusive() {
