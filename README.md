@@ -81,3 +81,52 @@ your phone — no local Android Studio required.
 Only `INTERNET` and `ACCESS_NETWORK_STATE`. All location / wifi / bluetooth / camera / mic
 permissions are explicitly removed in the manifest and asserted absent by test. The app must
 function without any location permission.
+
+## Editions (planned — not in the build yet)
+
+Two product editions are planned, `play` and `community`. **Neither exists in the build today** —
+`app/build.gradle.kts` declares no `productFlavors`, and every build produced from this tree right
+now is the single unflavored app. This section documents the intended split so that work landing
+against it has one definition to code to; treat every row below as a plan, not as behaviour you can
+observe.
+
+Both editions share the same core: the same alignment engine, the same hardened WebView, the same
+three constraints in the section above, and the same `INTERNET` + `ACCESS_NETWORK_STATE` permission
+set. Neither edition implements a VPN, and neither makes an anonymity claim.
+
+| | `play` | `community` |
+|---|---|---|
+| **Posture** | Conservative. Ships only what survives store review and is safe for a first-time user. | Everything, including the sharp edges. |
+| **Distribution** | Google Play (intended) | Sideloaded APK / GitHub Releases |
+| **Device identity** | **Initially "This device" only** — the real hardware identity, no spoof presets. | "This device" plus the full set of experimental device profiles (Pixel, Galaxy, iPhone, desktop Chrome). |
+| **Diagnostics** | User-facing readiness only. | Full developer diagnostics — what the browser actually exposes, per-signal pass/fail, and the injection-verification surface. |
+| **Experimental features** | Off. Nothing behind an unverified flag reaches this edition. | Where experimental work lands first. |
+| **Partner directory** | Planned addition, later — a curated directory of VPN providers. Not present at first release. | Not applicable. |
+
+The reason for the split is the spoof presets: presenting a device identity other than the real one
+is exactly the behaviour an app-store reviewer scrutinises, while it is the whole point of the tool
+for a user who sideloads deliberately. Rather than weaken the tool, `play` starts narrow and
+`community` stays complete.
+
+**Implementation note for contributors:** when these flavors do land, edition differences flow
+through an injected `DistributionCapabilities` value, never through `if (BuildConfig.FLAVOR)` at a
+call site. See [`CONTRIBUTING.md`](CONTRIBUTING.md) §5.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the toolchain, the test gate, the architecture
+conventions, and the MPL source-file header policy. Security issues go through the private route in
+[`SECURITY.md`](SECURITY.md), not the public issue tracker.
+
+Every third-party dependency and its license is inventoried in
+[`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md).
+
+## License
+
+GeoAlign Browser is licensed under the **Mozilla Public License 2.0**. The full text is in
+[`LICENSE`](LICENSE), and attribution for third-party components is in [`NOTICE`](NOTICE).
+
+MPL 2.0 is a file-level copyleft: you may use these files in a larger work under your own terms, but
+modifications to MPL-covered files stay under the MPL and must be made available in source form.
+This project carries plain MPL 2.0 with no "Incompatible With Secondary Licenses" notice, so it
+remains compatible with the GPL, LGPL, and AGPL as Secondary Licenses.

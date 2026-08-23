@@ -1,0 +1,75 @@
+GeoAlign Browser
+Copyright (c) 2026 KHA Entertainment
+
+This product is licensed under the Mozilla Public License, v. 2.0.
+A copy of the license is distributed with this software in the file LICENSE,
+and can also be obtained at https://mozilla.org/MPL/2.0/.
+
+--------------------------------------------------------------------------------
+First-party source
+--------------------------------------------------------------------------------
+
+All source files under app/src/ are original work by the GeoAlign Browser
+authors, including the injected browser-environment assets:
+
+  app/src/main/assets/env_bundle.js      geolocation / timezone / locale shims
+  app/src/main/assets/device_bundle.js   device-identity shims
+  app/src/main/assets/poc.html           in-app diagnostics page
+
+No third-party source code, fonts, icon sets, or images are vendored into this
+repository. Every third-party component listed below is resolved from a package
+repository at build time and is not redistributed in source form here.
+
+--------------------------------------------------------------------------------
+Third-party components
+--------------------------------------------------------------------------------
+
+The following components are linked into a distributed build of this
+application. The full inventory, with exact versions and per-component license
+determinations, is maintained in docs/DEPENDENCIES.md.
+
+Apache License 2.0
+------------------
+The following components are licensed under the Apache License, Version 2.0.
+You may obtain a copy of the License at
+http://www.apache.org/licenses/LICENSE-2.0.
+
+  AndroidX libraries (androidx.core, androidx.lifecycle, androidx.activity,
+    androidx.compose, androidx.webkit)
+    Copyright (c) The Android Open Source Project
+
+  Kotlin standard library, kotlinx.coroutines, kotlinx.serialization
+    Copyright (c) 2010-2026 JetBrains s.r.o. and Kotlin Programming Language
+    contributors
+
+  OkHttp
+    Copyright (c) Square, Inc.
+
+Build-time only
+---------------
+The Android Gradle Plugin, the Kotlin Gradle plugins, and the Gradle build tool
+are used to build this software and are not linked into the distributed
+application. They are licensed under the Apache License, Version 2.0.
+
+Test-time only
+--------------
+JUnit 4 (junit:junit) is used for unit tests only and is not linked into the
+distributed application. It is licensed under the Eclipse Public License 1.0
+(https://www.eclipse.org/legal/epl-v10.html).
+
+--------------------------------------------------------------------------------
+Runtime services
+--------------------------------------------------------------------------------
+
+The application makes outbound HTTPS requests to third-party services that it
+neither bundles nor licenses: public IP-echo endpoints and an IP-geolocation
+provider. These are network services governed by their own terms, not software
+distributed with this application. See docs/DEPENDENCIES.md for the list.
+
+--------------------------------------------------------------------------------
+Scope note
+--------------------------------------------------------------------------------
+
+GeoAlign Browser renders web content in an Android System WebView provided by
+the host device. That WebView is part of the operating system, is not
+distributed with this application, and carries its own licensing.
