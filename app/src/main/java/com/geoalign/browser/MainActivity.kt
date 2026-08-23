@@ -24,6 +24,7 @@ import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.geoalign.ui.components.AppScaffold
+import com.geoalign.ui.readiness.ReadinessScreen
 import com.geoalign.ui.theme.GeoAlignTheme
 import com.geoalign.web.policy.BrowserPermissionPolicy
 import com.geoalign.web.policy.LocalNetworkInterceptor
@@ -31,8 +32,9 @@ import android.util.Log
 import org.json.JSONArray
 
 /**
- * App entry point. Home is the readiness dashboard (spec §25); the POC diagnostics WebView is
- * reachable from it via "Open diagnostics" so the on-device environment can still be verified.
+ * App entry point. Home is the readiness screen (spec §25); the POC diagnostics WebView is
+ * reachable from it via the Diagnostics disclosure row so the on-device environment can still be
+ * verified.
  */
 private enum class Screen { Readiness, Diagnostics, Editor, Browser }
 
@@ -65,7 +67,7 @@ class MainActivity : ComponentActivity() {
                             }
                             Screen.Editor -> ProfileEditor(onDone = { screen = Screen.Readiness })
                             Screen.Browser -> BrowserScreen(onExit = { screen = Screen.Readiness })
-                            Screen.Readiness -> ReadinessDashboard(
+                            Screen.Readiness -> ReadinessScreen(
                                 onOpenDiagnostics = { screen = Screen.Diagnostics },
                                 onEditProfile = { screen = Screen.Editor },
                                 onOpenBrowser = { screen = Screen.Browser },

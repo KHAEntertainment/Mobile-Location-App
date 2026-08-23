@@ -129,13 +129,17 @@ object ReadinessPresenter {
             }
         }
 
+        val head = headline(input, level, alignment, vpnDroppedLive, busy, copy)
+
         return ReadinessUiState(
             status = StatusBlock(
                 tone = tone,
                 glyph = glyph,
-                headline = headline(input, level, alignment, vpnDroppedLive, busy, copy),
+                headline = head,
                 exitLine = exitLine(input, alignment),
-                transportLine = transportLine(vpn, copy),
+                // Dropped when it would only restate the headline. "No VPN detected" above
+                // "No VPN detected" is the same redundancy this screen exists to remove.
+                transportLine = transportLine(vpn, copy)?.takeIf { it != head },
                 transportTone = transportTone(vpn, input.userAcceptedNoVpn, vpnDroppedLive),
                 freshnessLine = Freshness.checkedLabel(input.checkedAtMillis, input.nowMillis, copy),
                 notes = notes,

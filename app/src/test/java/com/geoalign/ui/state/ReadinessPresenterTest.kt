@@ -247,6 +247,18 @@ class ReadinessPresenterTest {
         assertTrue(withNull.status.notes.none { it.id == NoteId.VPN_DROPPED_LIVE })
     }
 
+    /** The status block must not say the same thing twice in two type sizes. */
+    @Test fun theTransportLineIsDroppedWhenItOnlyRestatesTheHeadline() {
+        val blocked = ReadinessPresenter.present(input(evaluation = eval(vpn = VpnTransport.NOT_DETECTED)))
+        assertEquals("No VPN detected", blocked.status.headline)
+        assertNull(blocked.status.transportLine)
+
+        // When it adds something, it stays.
+        val aligned = ReadinessPresenter.present(input())
+        assertEquals("Browser aligned", aligned.status.headline)
+        assertEquals("VPN detected", aligned.status.transportLine)
+    }
+
     // --- invariants ----------------------------------------------------------------------------
 
     /** The raw address must never reach the screen; only the redacted form may. */
