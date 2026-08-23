@@ -20,6 +20,7 @@ class WebViewCapabilitiesTest {
         assertFalse(none.userAgentMetadata)
         assertFalse(none.safeBrowsing)
         assertFalse(none.serviceWorkerControl)
+        assertFalse(none.errorDescription)
         assertNull(none.packageName)
         assertNull(none.packageVersion)
     }
@@ -32,6 +33,7 @@ class WebViewCapabilitiesTest {
                 userAgentMetadata = true,
                 safeBrowsing = true,
                 serviceWorkerControl = true,
+                errorDescription = true,
                 packageName = "com.google.android.webview",
                 packageVersion = "151.0.7922.169",
             )
@@ -43,6 +45,7 @@ class WebViewCapabilitiesTest {
         assertTrue(capabilities.userAgentMetadata)
         assertTrue(capabilities.safeBrowsing)
         assertTrue(capabilities.serviceWorkerControl)
+        assertTrue(capabilities.errorDescription)
         assertEquals("com.google.android.webview", capabilities.packageName)
         assertEquals("151.0.7922.169", capabilities.packageVersion)
     }

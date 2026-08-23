@@ -34,6 +34,13 @@ data class WebViewCapabilities(
      * that claims requests are being filtered has to know whether that path can be reached at all.
      */
     val serviceWorkerControl: Boolean,
+    /**
+     * `WebResourceErrorCompat.getDescription` is available. Purely cosmetic — a failed load is
+     * reported either way — but it belongs here rather than at the call site, because reading it
+     * defensively inside `BrowserWebViewClient` was the one place left that decided a
+     * capability question on its own.
+     */
+    val errorDescription: Boolean,
     /** Package name of the WebView implementation in use, or null if none could be resolved. */
     val packageName: String?,
     /** Version of that package (e.g. "151.0.7922.169"), or null if none could be resolved. */
@@ -50,6 +57,7 @@ data class WebViewCapabilities(
             userAgentMetadata = false,
             safeBrowsing = false,
             serviceWorkerControl = false,
+            errorDescription = false,
             packageName = null,
             packageVersion = null,
         )
