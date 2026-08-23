@@ -43,8 +43,12 @@ environment works, multi-tab works, and the live device switcher works.
 Native mode's browser identity was also made self-consistent with the device's real Chrome
 (commit `c4a52e5`), which closed the deferred `Sec-CH-UA` request-header gap along the way.
 
-**Builds are local now** — see [§6](#6-working-locally). A green gate is
-`./gradlew testDebugUnitTest lintDebug assembleDebug`: currently **191 tests, 0 failures**.
+**Builds are local now** — see [§6](#6-working-locally). The project has two product flavors, so
+the green gate is per edition:
+`./gradlew testPlayDebugUnitTest testCommunityDebugUnitTest lintPlayDebug lintCommunityDebug
+assemblePlayDebug assembleCommunityDebug`. There is no unflavored `testDebugUnitTest` or
+`assembleDebug` any more. Both editions are green in CI on every push; read current test counts
+from a workflow run rather than from this document.
 
 ## 3. Architecture at a glance (the non-obvious parts)
 
@@ -170,8 +174,13 @@ a newer JDK is too new for Gradle 8.11.1 / AGP 8.7.3:
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21
 export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
-./gradlew testDebugUnitTest lintDebug assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+./gradlew testPlayDebugUnitTest testCommunityDebugUnitTest
+./gradlew assemblePlayDebug assembleCommunityDebug
+
+# The two editions carry different applicationIds and install side by side:
+#   play      -> com.geoalign.browser
+#   community -> com.geoalign.browser.community
+adb install -r app/build/outputs/apk/community/debug/app-community-debug.apk
 ```
 
 - **Signing.** CI and local builds use different debug keystores, so the first local install over a
@@ -181,8 +190,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
   Keystore key cannot be exported by design and must be re-entered.
 - **DevTools over adb** is the highest-leverage tool here — see
   [`TROUBLESHOOTING_WEBVIEW.md`](TROUBLESHOOTING_WEBVIEW.md) §3.
-- **CI** is `.github/workflows/android.yml` (unit tests → lint → `assembleDebug` → rolling
-  `latest-debug` prerelease APK). Treat workflow edits as high-care.
+- **CI** is `.github/workflows/android.yml`, a **matrix over both flavors** (unit tests → lint →
+  assemble → rolling `latest-debug` prerelease APK). Treat workflow edits as high-care: a matrix
+  key that differs only by case silently produces **zero jobs**, because Actions context keys are
+  case-insensitive while YAML is not. Lint still runs with `|| true`, so it cannot fail a build —
+  removing that is M7 work, and it has already let a real regression through once.
 
 **Conventions to preserve:** ship in **small reviewable slices, each green before proceeding**; put
 logic in `core.*` with unit tests and keep Android glue thin; never weaken the three honesty
