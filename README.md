@@ -7,22 +7,35 @@ apparent exit of an **already-running, user-operated** VPN. It does **not** impl
 
 ## Status
 
-Milestone 1 (proofs of concept). This tree currently contains:
+Milestones 1–3 are implemented and validated on-device. This tree contains:
 
-- Project + Gradle scaffold (single-activity Compose, version catalog, minimal permissions).
-- `LocalNetworkPolicy` — CIDR / hostname / alt-notation blocker (spec §16) with an exhaustive unit-test suite.
-- `ReadinessReducer` — pure readiness state machine (spec §7) with unit tests.
-- `env_bundle.js` — the document-start environment bundle (geolocation / timezone / locale virtualization, spec §11–13).
-- `MainActivity` — a **POC harness** that injects the bundle into a hardened WebView and loads a bundled diagnostics page (`poc.html`) exercising POC 1–4.
-- GitHub Actions CI that runs unit tests and builds the debug APK.
+- **M1 — foundations.** Gradle scaffold (single-activity Compose, version catalog, minimal
+  permissions), `LocalNetworkPolicy` (CIDR / hostname / alt-notation blocker, spec §16) with an
+  exhaustive unit-test suite, `ReadinessReducer` (pure readiness state machine, spec §7), and
+  `env_bundle.js` — the document-start environment bundle (geolocation / timezone / locale
+  virtualization, spec §11–13). A diagnostics page (`poc.html`) still exercises the POCs.
+- **M2 — data foundation.** VPN / effective-IP / IP-geolocation repositories, `ReadinessService`
+  and the readiness dashboard, JSON profile storage with Android Keystore for API keys, the profile
+  editor, and "Match Browser to VPN".
+- **M3 — the browser.** Multi-tab browsing over a single hardened WebView, device emulation
+  (`device_bundle.js` + UA / UA-CH), SSL and external-scheme policy, downloads, and clear-session.
+- GitHub Actions CI: unit tests → lint → debug APK.
 
-This is not the finished browser; it is the risk-reduction step the spec requires before broad implementation.
+**142 unit tests, 0 failures.** Build and iterate locally — see
+[`docs/HANDOFF.md`](docs/HANDOFF.md) §6 for the toolchain, and
+[`docs/TROUBLESHOOTING_WEBVIEW.md`](docs/TROUBLESHOOTING_WEBVIEW.md) for diagnosing the WebView.
 
 ## Building
 
 The Android SDK and AndroidX are fetched from Google's Maven, which CI runners can reach.
 
+Gradle needs JDK 17–21 and the Android SDK. A newer system JDK is fine as long as Gradle is
+pointed at a supported one; see [`docs/HANDOFF.md`](docs/HANDOFF.md) §6 for the local setup.
+
 ```bash
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21
+export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
+
 # Unit tests (no device needed)
 ./gradlew testDebugUnitTest
 
@@ -33,13 +46,16 @@ The Android SDK and AndroidX are fetched from Google's Maven, which CI runners c
 ./gradlew assembleDebug
 
 # Install on a connected device / emulator
+# NOTE: replacing a CI-built APK fails with INSTALL_FAILED_UPDATE_INCOMPATIBLE (different
+# debug keystore) and needs `adb uninstall` first, which wipes saved profiles and the
+# Keystore-held API key. See docs/HANDOFF.md §6 to rescue profiles beforehand.
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 # Sanitized logs
 adb logcat | grep -i geoalign
 ```
 
-### CI (recommended)
+### CI
 
 Push to `main` or any `feature/**` branch, or run the **Android CI** workflow manually. It:
 1. runs unit tests, 2. lints, 3. builds the debug APK, and 4. uploads `app-debug.apk` as a

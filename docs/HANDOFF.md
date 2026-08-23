@@ -25,24 +25,26 @@ Everything the page sees is virtualized inside an embedded WebView; the device i
 
 ## 2. Current status
 
-Milestones **M1 (POCs), M2 (data foundation), M3 (browser)** are all implemented and were green
-in CI historically. The browser is functional and has been validated on-device: DuckDuckGo loads,
-the injected location/timezone/locale environment works, multi-tab works, and the live device
-switcher works.
+Milestones **M1 (POCs), M2 (data foundation), M3 (browser)** are implemented, and the browser is
+validated on-device: DuckDuckGo and Tinder both load, the injected location/timezone/locale
+environment works, multi-tab works, and the live device switcher works.
 
-**Immediate blocker (as of this handoff):** CI runs **#22 (`c8f9b55`)** and **#23 (`409b888`)**
-both **failed at runner startup (~3–5s, empty logs, before any build step)**. That signature is an
-account-level Actions problem — almost certainly **billing / exhausted Actions minutes / a spending
-limit** on the private repo, *not* a code failure. The user is re-running the workflow. Until a
-build goes green, no fresh APK is produced. **Last successful APK = build #21, commit `24fb4c7`**
-("This device" native mode).
+**No open blocker.** The two that dominated the previous handoff are both resolved:
 
-**Open functional issue:** Tinder still shows its **"Catch Us On The Flip Side — enjoy matching up
-from a portrait view"** gate. This is Tinder's own client-side gate, not a crash. A viewport fix
-(`useWideViewPort` / `loadWithOverviewMode`, commit `c8f9b55`) is committed but **unverified**
-because it hasn't been allowed to build. See [`TROUBLESHOOTING_WEBVIEW.md`](TROUBLESHOOTING_WEBVIEW.md).
+- **CI** was failing at runner startup (an account-level Actions problem, not code). Fixed by the
+  user. A separate, genuine blocker was also cleared: `lintDebug` failed on a false-positive
+  `PermissionImpliesUnsupportedChromeOsHardware` against the *removed* CAMERA permission
+  (commit `d0029cd`).
+- **The Tinder "portrait view" gate** is fixed (commit `58035e8`). The cause was not
+  WebView-hostile detection: the WebView reported a **CSS viewport height of 0**, so
+  `(orientation: landscape)` matched on every page. See
+  [`TROUBLESHOOTING_WEBVIEW.md`](TROUBLESHOOTING_WEBVIEW.md) §1.
 
----
+Native mode's browser identity was also made self-consistent with the device's real Chrome
+(commit `c4a52e5`), which closed the deferred `Sec-CH-UA` request-header gap along the way.
+
+**Builds are local now** — see [§6](#6-working-locally). A green gate is
+`./gradlew testDebugUnitTest lintDebug assembleDebug`: currently **142 tests, 0 failures**.
 
 ## 3. Architecture at a glance (the non-obvious parts)
 
@@ -51,7 +53,8 @@ because it hasn't been allowed to build. See [`TROUBLESHOOTING_WEBVIEW.md`](TROU
 - `com.geoalign.core.*` — **pure, dependency-free, unit-tested** logic: reducers, models, policies.
   No Android imports. Examples: `core.readiness` (ReadinessReducer), `core.net`
   (LocalNetworkPolicy, UrlNormalizer, ExternalSchemePolicy), `core.tabs` (TabList/TabListReducer),
-  `core.device` (DeviceProfile/DeviceProfiles), `core.model` (LocationProfile), `core.i18n`.
+  `core.device` (DeviceProfile/DeviceProfiles, **NativeIdentity**), `core.model` (LocationProfile),
+  `core.i18n`.
 - `com.geoalign.data.*` — Android/IO glue: VPN/IP/geolocation repositories, `ProfileStore` +
   `JsonFileProfileStore`, `ProfileFactory`, `ReadinessService`, secure key storage.
 - `com.geoalign.web.*` — WebView policy + injection: `web.policy` (BrowserWebViewClient,
@@ -75,10 +78,14 @@ Both compilers are **pure token-substitution + block-builders with unit tests**;
 `WebView.saveState`/`restoreState` keyed by the pure `TabList` model's tab id. Only the active tab
 is ever rendered (flat memory).
 
-**Device modes:** `DeviceProfiles.NATIVE` ("This device", the default) presents the *real* hardware
-geometry with a cleaned Chrome UA (strips the `; wv` embedded-WebView marker). Spoof presets
-(Pixel 8, Galaxy S24, iPhone 15 Pro/SE, desktop Chrome) override geometry + UA-CH; they carry the
-spoofing that hostile sites may reject. Selection persists to `LocationProfile.userAgentProfileId`.
+**Device modes:** `DeviceProfiles.NATIVE` ("This device", the default) presents the real hardware
+geometry plus the identity of the **device's own Chrome**, derived at runtime: `NativeIdentity`
+reproduces Chrome's *reduced* UA and `NativeUaMetadata` sets matching client hints via
+`WebSettingsCompat.setUserAgentMetadata` (which also fixes the `Sec-CH-UA` request headers).
+Native mode deliberately emits no `userAgentData` JS shim — see `TROUBLESHOOTING_WEBVIEW.md` §2.
+Spoof presets (Pixel 8, Galaxy S24, iPhone 15 Pro/SE, desktop Chrome) override geometry + UA-CH;
+they carry the spoofing that hostile sites may reject. Selection persists to
+`LocationProfile.userAgentProfileId`.
 
 **Persistence:** kotlinx.serialization JSON file + Android Keystore (AES-256/GCM). **Deliberately
 no Room** (avoids an annotation processor and keeps CI simple).
@@ -114,58 +121,72 @@ no Room** (avoids an annotation processor and keeps CI simple).
 - **White-on-white status bar:** edge-to-edge + light background made the clock invisible → system
   bar strips tinted with the primary color + light bar icons (commit `24e4fca`).
 - **Embedded-WebView detection:** led to native mode (above).
-- **Orientation/viewport gate:** WebView default `useWideViewPort=false` lays responsive sites out
-  at the raw width, so `(orientation: landscape)` can read true → the current (unverified) Tinder fix.
+- **Zero-height CSS viewport (the big one):** Compose's `AndroidView` leaves a child's own
+  `LayoutParams` at `WRAP_CONTENT`, and WebView takes its CSS viewport height from `LayoutParams`
+  rather than from the measured size — so `100vh` resolved to `0` and `(orientation: landscape)`
+  matched on *every* page. This was the Tinder gate. It survived weeks of wrong theories
+  (embedded-WebView rejection; an unhonoured `<meta viewport>`, commit `c8f9b55`) because nobody
+  measured `100vh`. **Prefer a measurement over a plausible story** — the DevTools-over-adb method in
+  `TROUBLESHOOTING_WEBVIEW.md` §3 turns that into a two-minute check.
+- **Native mode contradicted itself:** it sent a truthful UA string beside hardcoded client hints
+  claiming Chrome 126 / Android 14 on a Chrome 151 / Android 16 device. Real Chrome always agrees
+  with itself, so cross-checking sites read the mismatch as spoofing. Real Chrome also sends a
+  *reduced* UA (frozen `Android 10; K`) — stripping the `wv` marker is not enough.
 
 ---
 
 ## 5. Next logical steps (priority order)
 
-1. **Unblock CI** (Actions billing/minutes) → re-run → confirm a green build and fresh
-   `latest-debug` APK.
-2. **Verify the viewport fix against Tinder.** If it still gates, use `chrome://inspect` (enabled on
-   debug builds) per `TROUBLESHOOTING_WEBVIEW.md` to compare our WebView's signals against real
-   Chrome — turn guessing into evidence.
-3. **Native `Sec-CH-UA` header swap** via `WebSettingsCompat.setUserAgentMetadata` — the one
-   deferred device-emulation piece. Client-side JS identity is handled; the HTTP request headers
-   still carry the WebView identity. Do this only if the inspector confirms a site gates on headers.
-   (API shape wasn't compile-verifiable in the remote sandbox — a local session can build and check.)
-4. **Fold the device picker into `ProfileEditor`** (currently only in the browser toolbar).
-5. **Add a visible build/version stamp** (natural home: the "Site & privacy" sheet) so "which build
-   am I on?" stops being guesswork. Consider a `BuildConfig` git-SHA field.
-6. **Refresh `README.md`** — its Status section still says "Milestone 1 (POCs)".
-7. **Toolchain upgrade path** (webkit 1.16 / API 36) once everything is stable and green.
-8. **Remaining scope** not yet built — `ARCHITECTURE_PLAN.md` is the best in-repo list of intended
+1. **Refresh the on-device sanity pass** after the viewport fix — the whole layout was previously
+   laid out against a zero-height viewport, so any CSS that looked subtly wrong is worth re-checking.
+2. **Add a visible build/version stamp** (natural home: the "Site & privacy" sheet; a `BuildConfig`
+   git-SHA field). Less urgent now that `adb install` makes the installed build knowable, but it
+   still ends "which build am I on?" for good.
+3. **Fold the device picker into `ProfileEditor`** (currently only in the browser toolbar).
+4. **Consider shimming the remaining WebView tells** — `window.chrome`, `Notification` — but only
+   against a *confirmed* detection. See `TROUBLESHOOTING_WEBVIEW.md` §4; this widens the
+   fingerprint-spoofing surface, so it is not free.
+5. **Toolchain upgrade path** (webkit 1.16 / API 36) once everything is stable and green.
+6. **Remaining scope** not yet built — `ARCHITECTURE_PLAN.md` is the best in-repo list of intended
    scope, but the authoritative requirement list lives in the uncommitted spec (see §8); confirm
    with Billy before treating any `spec §n` as ground truth.
 
----
+## 6. Working locally
 
-## 6. Working in a local Claude Code session (what changes)
+This project was originally built remotely (cloud sandbox → GitHub → CI-built APK the user
+sideloaded and screenshotted). It is now developed **locally on macOS**, which removes that entire
+loop. Toolchain, installed via Homebrew:
 
-This project was built **remotely from a mobile/Cowork session**: code authored in a cloud sandbox,
-pushed to `KHAEntertainment/Mobile-Location-App` via a GitHub integration, with CI building and
-publishing a rolling `latest-debug` prerelease APK. A local Claude Code session simplifies most of
-that:
+| Component | Notes |
+|---|---|
+| `adb` (`android-platform-tools`) | device + DevTools access |
+| `android-commandlinetools` | SDK root `/opt/homebrew/share/android-commandlinetools` |
+| `platforms;android-35`, `build-tools;35.0.0` | matches `compileSdk = 35` |
+| **OpenJDK 21** (`brew install openjdk@21`) | *not* the `temurin@21` cask — its `.pkg` installer needs an interactive sudo password |
 
-- **You have the repo checked out.** Build and test locally:
-  `./gradlew testDebugUnitTest`, `./gradlew lintDebug`, `./gradlew assembleDebug`
-  (APK → `app/build/outputs/apk/debug/app-debug.apk`). No remote push integration needed — commit
-  and push with plain `git`.
-- **`chrome://inspect` is trivial** over USB with a debug build — use it liberally for WebView work.
-- **CI** is `.github/workflows/android.yml` (push to `main`/`feature/**`, or run manually). It runs
-  unit tests → lint → `assembleDebug` → overwrites the `latest-debug` prerelease APK. **The agent
-  cannot modify files under `.github/workflows/` via the API** — that has always required the human
-  to edit the workflow directly. In a local session with push rights this constraint may not apply,
-  but treat workflow changes as high-care.
-- **No in-app version stamp yet** — see step 5 above; until then, identify a build by the Device
-  menu having "This device (recommended)" at the top (= build #21+) and readable purple status bars.
+The system default JDK is deliberately left alone; Gradle is pointed at 21 per invocation, because
+a newer JDK is too new for Gradle 8.11.1 / AGP 8.7.3:
 
-**Conventions to preserve:** ship in **small reviewable slices, each green in CI before proceeding**;
-put logic in `core.*` with unit tests and keep Android glue thin; never weaken the three honesty
+```bash
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21
+export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
+./gradlew testDebugUnitTest lintDebug assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+- **Signing.** CI and local builds use different debug keystores, so the first local install over a
+  CI-built APK fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE` and needs an `adb uninstall` — which
+  **wipes saved profiles and the Keystore-held API key**. Profiles can be rescued first with
+  `adb exec-out run-as com.geoalign.browser cat files/profiles.json` (debuggable builds only); the
+  Keystore key cannot be exported by design and must be re-entered.
+- **DevTools over adb** is the highest-leverage tool here — see
+  [`TROUBLESHOOTING_WEBVIEW.md`](TROUBLESHOOTING_WEBVIEW.md) §3.
+- **CI** is `.github/workflows/android.yml` (unit tests → lint → `assembleDebug` → rolling
+  `latest-debug` prerelease APK). Treat workflow edits as high-care.
+
+**Conventions to preserve:** ship in **small reviewable slices, each green before proceeding**; put
+logic in `core.*` with unit tests and keep Android glue thin; never weaken the three honesty
 constraints in §1.
-
----
 
 ## 7. Guardrails & gotchas
 
@@ -206,8 +227,8 @@ resolve to a real source of truth.
 | *(uncommitted)* engineering spec `.docx` | The real requirements + `spec §n` numbering — held by Billy, not in the repo |
 | `docs/VALIDATION_M1.md` | M1 adversarial review findings + dispositions |
 | `docs/POC_NOTES.md` | What each POC proves and how to read pass/fail |
-| `docs/TROUBLESHOOTING_WEBVIEW.md` | WebView-hostile sites (Tinder), native mode, viewport fix, `chrome://inspect` checklist |
-| `README.md` | Build/CI commands (⚠ Status section is stale — says Milestone 1) |
+| `docs/TROUBLESHOOTING_WEBVIEW.md` | The zero-height viewport bug, native-mode identity, **DevTools-over-adb method**, remaining WebView tells |
+| `README.md` | Status, build/CI commands, toolchain versions |
 
 ---
 
@@ -226,6 +247,10 @@ resolve to a real source of truth.
 - `19c3c69` M3 slice 3: device emulation (UA + JS device signals)
 - `6047861` M3 slice 4: finishing touches (SSL, schemes, downloads, clear-session)
 - `24e4fca` UX: tint system bars readable + enable WebView debugging
-- `24fb4c7` **Device: "This device" native mode (default)** ← last green APK (build #21)
-- `c8f9b55` Fix Tinder portrait gate: honor viewport meta (**unbuilt — CI blocked**)
-- `409b888` docs: WebView troubleshooting + re-trigger CI (**unbuilt — CI blocked**)
+- `24fb4c7` Device: "This device" native mode (default)
+- `c8f9b55` Fix Tinder portrait gate: honor viewport meta (*did not fix it — wrong layer*)
+- `409b883` docs: WebView troubleshooting + re-trigger CI
+- `6186412` docs: session handoff
+- `d0029cd` Fix lint false positive on the removed CAMERA permission (**unblocks CI**)
+- `c4a52e5` **Native mode: real Chrome identity** (UA reduction + `setUserAgentMetadata`)
+- `58035e8` **Fix zero-height CSS viewport** ← the actual Tinder fix
