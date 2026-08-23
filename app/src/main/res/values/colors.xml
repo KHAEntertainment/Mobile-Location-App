@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mirrors GeoPalette.WarmBg in ui/theme/Color.kt, which is the source of truth. Duplicated
+         here only because windowBackground is applied by the platform before the first Compose
+         frame; without it the app flashes the system default white/grey on launch. -->
+    <color name="geo_window_background">#FFF7F5F2</color>
+</resources>

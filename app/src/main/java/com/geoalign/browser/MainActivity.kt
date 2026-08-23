@@ -1,35 +1,30 @@
 package com.geoalign.browser
 
 import android.annotation.SuppressLint
-import android.app.Activity
+import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.view.WindowCompat
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import com.geoalign.ui.components.AppScaffold
+import com.geoalign.ui.theme.GeoAlignTheme
 import com.geoalign.web.policy.BrowserPermissionPolicy
 import com.geoalign.web.policy.LocalNetworkInterceptor
 import android.util.Log
@@ -39,47 +34,42 @@ import org.json.JSONArray
  * App entry point. Home is the readiness dashboard (spec §25); the POC diagnostics WebView is
  * reachable from it via "Open diagnostics" so the on-device environment can still be verified.
  */
-private enum class Screen { Dashboard, Diagnostics, Editor, Browser }
+private enum class Screen { Readiness, Diagnostics, Editor, Browser }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Transparent system bars with dark icons, rather than painting both bars with the accent.
+        // SystemBarStyle.light() applies its own scrim on API levels that cannot render dark
+        // navigation-bar icons (< 27), which matters at minSdk 26.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT),
+        )
         setContent {
-            MaterialTheme {
-                // Tint the system-bar strips so the status-bar clock/notifications and the nav bar
-                // are readable (they sit on a colored band, with light icons) instead of white-on-white.
-                val barColor = MaterialTheme.colorScheme.primary
-                val view = LocalView.current
-                if (!view.isInEditMode) {
-                    SideEffect {
-                        val window = (view.context as Activity).window
-                        val controller = WindowCompat.getInsetsController(window, view)
-                        controller.isAppearanceLightStatusBars = false
-                        controller.isAppearanceLightNavigationBars = false
-                    }
-                }
-                // Outer surface fills behind the system bars (edge-to-edge) and provides the bar color;
-                // the inner surface is inset to the safe area and hosts the app content.
-                Surface(modifier = Modifier.fillMaxSize(), color = barColor) {
-                    Surface(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
-                        Box(Modifier.fillMaxSize()) {
-                            var screen by remember { mutableStateOf(Screen.Dashboard) }
-                            when (screen) {
-                                Screen.Diagnostics -> Column(Modifier.fillMaxSize()) {
-                                    OutlinedButton(
-                                        onClick = { screen = Screen.Dashboard },
-                                        modifier = Modifier.padding(8.dp),
-                                    ) { Text("← Back to readiness") }
-                                    PocWebView(Modifier.fillMaxSize())
-                                }
-                                Screen.Editor -> ProfileEditor(onDone = { screen = Screen.Dashboard })
-                                Screen.Browser -> BrowserScreen(onExit = { screen = Screen.Dashboard })
-                                Screen.Dashboard -> ReadinessDashboard(
-                                    onOpenDiagnostics = { screen = Screen.Diagnostics },
-                                    onEditProfile = { screen = Screen.Editor },
-                                    onOpenBrowser = { screen = Screen.Browser },
-                                )
+            GeoAlignTheme {
+                // One surface, inset to the safe area. Content draws under the (transparent) bars.
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background,
+                ) {
+                    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                        var screen by rememberSaveable { mutableStateOf(Screen.Readiness) }
+                        when (screen) {
+                            Screen.Diagnostics -> AppScaffold(
+                                title = "Diagnostics",
+                                onBack = { screen = Screen.Readiness },
+                                scrollable = false,
+                            ) {
+                                PocWebView(Modifier.fillMaxSize())
                             }
+                            Screen.Editor -> ProfileEditor(onDone = { screen = Screen.Readiness })
+                            Screen.Browser -> BrowserScreen(onExit = { screen = Screen.Readiness })
+                            Screen.Readiness -> ReadinessDashboard(
+                                onOpenDiagnostics = { screen = Screen.Diagnostics },
+                                onEditProfile = { screen = Screen.Editor },
+                                onOpenBrowser = { screen = Screen.Browser },
+                            )
                         }
                     }
                 }
