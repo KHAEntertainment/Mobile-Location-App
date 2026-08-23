@@ -78,9 +78,14 @@ your phone — no local Android Studio required.
 
 ## Permissions
 
-Only `INTERNET` and `ACCESS_NETWORK_STATE`. All location / wifi / bluetooth / camera / mic
-permissions are explicitly removed in the manifest and asserted absent by test. The app must
-function without any location permission.
+Only `INTERNET` and `ACCESS_NETWORK_STATE`. Location, wifi, camera, and microphone permissions are
+explicitly removed in the manifest with `tools:node="remove"`, so a dependency cannot merge one back
+in. The app must function without any location permission.
+
+> **No automated test asserts their absence.** There is no `app/src/androidTest` source set in this
+> repository yet, so the claim rests on the manifest, not on a test. The assertion against the
+> merged manifest is scheduled for the M7 release-gate work; until then, verify by reading
+> [`app/src/main/AndroidManifest.xml`](app/src/main/AndroidManifest.xml).
 
 ## Editions (planned — not in the build yet)
 
