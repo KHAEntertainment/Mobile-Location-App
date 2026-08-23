@@ -1,5 +1,6 @@
 package com.geoalign.core.monitor
 
+import com.geoalign.core.alignment.MatchScope
 import com.geoalign.core.model.IpGeolocation
 import com.geoalign.core.model.LocationProfile
 import com.geoalign.core.readiness.VpnTransport
@@ -272,6 +273,25 @@ class AlignmentMonitorReducerTest {
         )
         assertEquals(MonitorStatus.UNABLE_TO_VERIFY, s.status)
         assertFalse(s.isAligned)
+    }
+
+    /**
+     * Labels absent on the estimate but coordinates present and close, so the haversine check does
+     * run and passes. That is still not evidence about the country and city a site reads, so the
+     * monitor reports a failure to verify rather than a green claim. Guards the seam this fix
+     * moved: the reducer now reads `matchedOn == MatchScope.NONE` instead of inferring the same
+     * fact from the checker's two unverified reasons (issue #19).
+     */
+    @Test fun agreeingCoordinatesWithoutAnyLabelIsStillUnableToVerify() {
+        val s = reduce(
+            AlignmentMonitorState(),
+            observed(VpnTransport.DETECTED),
+            completed(geo = exit(country = null, city = null)),
+        )
+        assertEquals(MonitorStatus.UNABLE_TO_VERIFY, s.status)
+        assertEquals(MonitorReason.EXIT_UNKNOWN, s.reason)
+        assertFalse(s.isAligned)
+        assertEquals(MatchScope.NONE, s.alignment?.matchedOn)
     }
 
     // --- no profile ------------------------------------------------------------------------------

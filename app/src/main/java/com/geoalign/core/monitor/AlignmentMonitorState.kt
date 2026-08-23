@@ -1,10 +1,10 @@
 package com.geoalign.core.monitor
 
 import com.geoalign.core.alignment.AlignmentChecker
-import com.geoalign.core.alignment.AlignmentReason
 import com.geoalign.core.alignment.AlignmentResult
 import com.geoalign.core.alignment.AlignmentThresholds
 import com.geoalign.core.alignment.AlignmentVerdict
+import com.geoalign.core.alignment.MatchScope
 import com.geoalign.core.model.IpGeolocation
 import com.geoalign.core.model.LocationProfile
 import com.geoalign.core.readiness.VpnTransport
@@ -283,16 +283,22 @@ object AlignmentMonitorReducer {
     }
 
     /**
-     * True when an ALIGNED verdict rests on nothing: the estimate carried neither a country nor a
-     * city, so no comparison actually ran and the profile agreed with an empty record.
+     * True when an ALIGNED verdict rests on no label evidence at all: neither the country nor the
+     * city comparison ran, so the profile agreed with an empty record.
      *
      * [AlignmentChecker] treats a missing label as unverified rather than as a mismatch — correct
      * for it, since a provider that omits a city must not be reported as a contradiction. But a
-     * live monitor claiming "aligned" wants evidence, not the absence of a counter-example, so the
-     * one case where *every* comparison was skipped is reported as a failure to verify. The
-     * checker's own reasons are read here; none of its logic is restated.
+     * live monitor claiming "aligned" wants evidence, not the absence of a counter-example, so this
+     * is reported as a failure to verify. Note that the haversine check may well have *run* here
+     * and passed; that is deliberately not enough. Coordinates within the drift radius of a
+     * provider centroid say nothing about the country and city labels a site actually reads.
+     *
+     * Read straight off [AlignmentResult.matchedOn], which the checker now populates from what it
+     * compared rather than from what it attempted. This used to infer the same fact from the pair
+     * of unverified reasons because that value could not be trusted (issue #19); inferring it a
+     * second way now would be a competing definition of "nothing compared" free to drift from the
+     * checker's.
      */
     private fun comparedNothing(alignment: AlignmentResult): Boolean =
-        alignment.hasReason(AlignmentReason.COUNTRY_UNVERIFIED) &&
-            alignment.hasReason(AlignmentReason.CITY_UNVERIFIED)
+        alignment.matchedOn == MatchScope.NONE
 }
