@@ -14,11 +14,16 @@ Milestones 1–3 are implemented and validated on-device. This tree contains:
   exhaustive unit-test suite, `ReadinessReducer` (pure readiness state machine, spec §7), and
   `env_bundle.js` — the document-start environment bundle (geolocation / timezone / locale
   virtualization, spec §11–13). A diagnostics page (`poc.html`) still exercises the POCs.
-- **M2 — data foundation.** VPN / effective-IP / IP-geolocation repositories, `ReadinessService`
-  and the readiness dashboard, JSON profile storage with Android Keystore for API keys, the profile
-  editor, and "Match Browser to VPN".
+- **M2 — data foundation.** VPN / effective-IP / IP-geolocation repositories, `ReadinessService`,
+  JSON profile storage with Android Keystore for API keys, the profile editor, and "Match Browser
+  to VPN".
 - **M3 — the browser.** Multi-tab browsing over a single hardened WebView, device emulation
   (`device_bundle.js` + UA / UA-CH), SSL and external-scheme policy, downloads, and clear-session.
+- **M6 (in progress) — UX.** A design system (`ui/theme`) and shared components, and a readiness
+  screen built around one question: is the browser aligned and safe to open? Screen state is derived
+  by a pure, unit-tested presenter (`ui/state`) rather than inside composables, and
+  `AlignmentChecker` (`core/alignment`) compares the saved profile against the live exit so a
+  drifted or stale profile can no longer read as ready.
 - GitHub Actions CI: unit tests → lint → debug APK.
 
 **191 unit tests, 0 failures.** Build and iterate locally — see
