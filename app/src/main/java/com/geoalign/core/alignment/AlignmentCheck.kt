@@ -33,8 +33,30 @@ enum class AlignmentVerdict {
     ALIGNED,
 }
 
-/** Which comparison actually carried an [AlignmentVerdict.ALIGNED] result. */
-enum class MatchScope { CITY, COUNTRY }
+/**
+ * Which comparison actually carried an [AlignmentVerdict.ALIGNED] result — reported from what was
+ * compared, never from what was attempted.
+ *
+ * [NONE] exists because the alternative is a lie. A label absent on either side is recorded as
+ * unverified rather than as a mismatch (free providers vary in coverage, and a missing city must
+ * not read as a contradiction), so an estimate carrying neither label reaches [ALIGNED] having
+ * agreed with nothing. Spelling that as a third constant rather than as a null keeps it visible:
+ * `matchedOn` is already null for every non-[ALIGNED] verdict, and a second meaning layered onto
+ * that null is one a caller silently absorbs with `?:`. An exhaustive `when` cannot absorb [NONE].
+ */
+enum class MatchScope {
+    /** City labels were present on both sides and agreed. */
+    CITY,
+
+    /** Country codes were present on both sides and agreed; city could not be compared. */
+    COUNTRY,
+
+    /**
+     * Neither label could be compared. Nothing was matched — treat this as an absence of evidence,
+     * never as a match at a coarser scope.
+     */
+    NONE,
+}
 
 enum class AlignmentReason {
     NO_PROFILE,
@@ -51,7 +73,10 @@ enum class AlignmentReason {
 
 data class AlignmentResult(
     val verdict: AlignmentVerdict,
-    /** Non-null only when [verdict] is [AlignmentVerdict.ALIGNED]. */
+    /**
+     * Non-null only when [verdict] is [AlignmentVerdict.ALIGNED], and then it names the comparison
+     * that actually ran — [MatchScope.NONE] when none did.
+     */
     val matchedOn: MatchScope?,
     val reasons: List<AlignmentReason>,
     val profileCountry: String?,
@@ -141,8 +166,11 @@ object AlignmentChecker {
             return result(AlignmentVerdict.UNKNOWN)
         }
 
-        // 1. Country. The coarsest signal and the one sites act on most.
+        // 1. Country. The coarsest signal and the one sites act on most. Tracked, not inferred: a
+        //    country comparison that never ran must not be reported later as a country match.
+        var countryCompared = false
         if (pCountry != null && eCountry != null) {
+            countryCompared = true
             if (pCountry != eCountry) {
                 reasons += AlignmentReason.COUNTRY_MISMATCH
                 return result(AlignmentVerdict.DRIFTED_COUNTRY, distanceKm = distance(profile, exit))
@@ -180,9 +208,17 @@ object AlignmentChecker {
             return result(AlignmentVerdict.STALE_CAPTURE, distanceKm = km)
         }
 
+        // City is reported over country when both ran, being the narrower agreement. Neither is
+        // reported unless it ran — with both labels absent the honest answer is NONE, and the
+        // coordinate check above cannot stand in for one: proximity to a provider centroid says
+        // nothing about the labels a site actually reads.
         return result(
             AlignmentVerdict.ALIGNED,
-            matchedOn = if (cityCompared) MatchScope.CITY else MatchScope.COUNTRY,
+            matchedOn = when {
+                cityCompared -> MatchScope.CITY
+                countryCompared -> MatchScope.COUNTRY
+                else -> MatchScope.NONE
+            },
             distanceKm = km,
         )
     }
