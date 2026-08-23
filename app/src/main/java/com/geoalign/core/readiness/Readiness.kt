@@ -34,16 +34,43 @@ enum class ReadinessLevel {
     READY,
 }
 
+/**
+ * Stable identity for each warning the reducer can emit.
+ *
+ * The id exists so a presentation layer can re-tone, re-word or suppress a warning in context
+ * without string-matching. [NO_PROFILE], for example, is redundant next to a screen whose headline
+ * already says there is no profile and whose button already says "Match browser to VPN".
+ */
+enum class WarningId {
+    NO_NETWORK,
+    NO_VPN_BLOCKED,
+    NO_VPN_ACCEPTED,
+    INTERNET_UNREACHABLE,
+    EFFECTIVE_IP_FAILED,
+    GEOLOCATION_FAILED,
+    IP_STACK_DIVERGENCE,
+    NO_PROFILE,
+}
+
+/**
+ * [message] is a reasonable default rendering, kept so any surface can show something sensible
+ * without a copy table. Presentation layers are free to substitute their own wording keyed on [id].
+ */
+data class ReadinessWarning(val id: WarningId, val message: String)
+
 data class ReadinessState(
     val level: ReadinessLevel,
-    val warnings: List<String>,
+    val warnings: List<ReadinessWarning>,
     val canOpenBrowser: Boolean,
-)
+) {
+    /** Convenience for callers that only care whether a particular condition fired. */
+    fun has(id: WarningId): Boolean = warnings.any { it.id == id }
+}
 
 object ReadinessReducer {
 
     fun reduce(i: ReadinessInputs): ReadinessState {
-        val warnings = mutableListOf<String>()
+        val warnings = mutableListOf<ReadinessWarning>()
 
         if (i.vpn == VpnTransport.CHECKING || i.internetReachable == StepState.UNKNOWN) {
             return ReadinessState(ReadinessLevel.CHECKING, emptyList(), canOpenBrowser = false)
@@ -52,7 +79,12 @@ object ReadinessReducer {
         if (i.vpn == VpnTransport.NETWORK_UNAVAILABLE) {
             return ReadinessState(
                 ReadinessLevel.BLOCKED_NO_VPN,
-                listOf("No network is available. Connect to the internet and check again."),
+                listOf(
+                    ReadinessWarning(
+                        WarningId.NO_NETWORK,
+                        "No network is available. Connect to the internet and check again.",
+                    ),
+                ),
                 canOpenBrowser = false,
             )
         }
@@ -63,33 +95,54 @@ object ReadinessReducer {
             return ReadinessState(
                 ReadinessLevel.BLOCKED_NO_VPN,
                 listOf(
-                    if (i.vpn == VpnTransport.ERROR)
-                        "Could not confirm a VPN transport. Your real public network address may be visible."
-                    else
-                        "No VPN transport detected. Your real public network address may be visible.",
+                    ReadinessWarning(
+                        WarningId.NO_VPN_BLOCKED,
+                        if (i.vpn == VpnTransport.ERROR)
+                            "Could not confirm a VPN transport. Your real public network address may be visible."
+                        else
+                            "No VPN transport detected. Your real public network address may be visible.",
+                    ),
                 ),
                 canOpenBrowser = false,
             )
         }
 
         if (noVpn && i.userAcceptedNoVpn) {
-            warnings += "Continuing without a detected VPN — your real public IP may be exposed."
+            warnings += ReadinessWarning(
+                WarningId.NO_VPN_ACCEPTED,
+                "Continuing without a detected VPN — your real public IP may be exposed.",
+            )
         }
 
         if (i.internetReachable == StepState.FAILED) {
-            warnings += "Internet does not appear reachable through the current network."
+            warnings += ReadinessWarning(
+                WarningId.INTERNET_UNREACHABLE,
+                "Internet does not appear reachable through the current network.",
+            )
         }
         if (i.effectiveIp == StepState.FAILED) {
-            warnings += "Could not verify the effective public IP. Location suggestions may be inaccurate."
+            warnings += ReadinessWarning(
+                WarningId.EFFECTIVE_IP_FAILED,
+                "Could not verify the effective public IP. Location suggestions may be inaccurate.",
+            )
         }
         if (i.geolocation == StepState.FAILED) {
-            warnings += "IP geolocation lookup failed. Enter or pick a location manually."
+            warnings += ReadinessWarning(
+                WarningId.GEOLOCATION_FAILED,
+                "IP geolocation lookup failed. Enter or pick a location manually.",
+            )
         }
         if (i.ipStackDivergence) {
-            warnings += "IPv4 and IPv6 appear to exit in different locations — a possible leak path."
+            warnings += ReadinessWarning(
+                WarningId.IP_STACK_DIVERGENCE,
+                "IPv4 and IPv6 appear to exit in different locations — a possible leak path.",
+            )
         }
         if (!i.profileSelected) {
-            warnings += "No browser profile yet — tap \"Match browser to VPN\" to create one."
+            warnings += ReadinessWarning(
+                WarningId.NO_PROFILE,
+                "No browser profile yet — tap \"Match browser to VPN\" to create one.",
+            )
         }
 
         val allCoreOk = i.internetReachable == StepState.OK &&

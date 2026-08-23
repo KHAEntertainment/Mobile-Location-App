@@ -3,6 +3,7 @@ package com.geoalign.data.readiness
 import com.geoalign.core.model.IpGeolocation
 import com.geoalign.core.readiness.ReadinessLevel
 import com.geoalign.core.readiness.VpnTransport
+import com.geoalign.core.readiness.WarningId
 import com.geoalign.data.geolocation.IpGeolocationProvider
 import com.geoalign.data.net.EffectiveIp
 import com.geoalign.data.net.EffectiveIpRepository
@@ -84,7 +85,7 @@ class ReadinessServiceTest {
         )
         val e = svc.evaluate(profileSelected = true)
         assertEquals(ReadinessLevel.READY_WITH_WARNINGS, e.state.level)
-        assertTrue(e.state.warnings.any { it.contains("effective public IP", ignoreCase = true) })
+        assertTrue(e.state.has(WarningId.EFFECTIVE_IP_FAILED))
         assertNull(e.geolocation) // geo not attempted without an IP
     }
 
@@ -96,6 +97,6 @@ class ReadinessServiceTest {
         )
         val e = svc.evaluate(profileSelected = true)
         assertEquals(ReadinessLevel.READY_WITH_WARNINGS, e.state.level)
-        assertTrue(e.state.warnings.any { it.contains("geolocation", ignoreCase = true) })
+        assertTrue(e.state.has(WarningId.GEOLOCATION_FAILED))
     }
 }

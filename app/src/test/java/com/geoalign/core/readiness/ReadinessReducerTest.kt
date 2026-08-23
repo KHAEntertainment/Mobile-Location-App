@@ -19,7 +19,7 @@ class ReadinessReducerTest {
         )
         assertEquals(ReadinessLevel.BLOCKED_NO_VPN, s.level)
         assertFalse(s.canOpenBrowser)
-        assertTrue(s.warnings.any { it.contains("real public", ignoreCase = true) })
+        assertTrue(s.has(WarningId.NO_VPN_BLOCKED))
     }
 
     @Test fun networkUnavailableBlocks() {
@@ -42,7 +42,7 @@ class ReadinessReducerTest {
         )
         assertEquals(ReadinessLevel.READY_WITH_WARNINGS, s.level)
         assertTrue(s.canOpenBrowser)
-        assertTrue(s.warnings.any { it.contains("without a detected VPN", ignoreCase = true) })
+        assertTrue(s.has(WarningId.NO_VPN_ACCEPTED))
     }
 
     @Test fun fullyReadyWhenEverythingGreen() {
@@ -72,7 +72,7 @@ class ReadinessReducerTest {
             )
         )
         assertEquals(ReadinessLevel.READY_WITH_WARNINGS, s.level)
-        assertTrue(s.warnings.any { it.contains("IPv4 and IPv6", ignoreCase = true) })
+        assertTrue(s.has(WarningId.IP_STACK_DIVERGENCE))
     }
 
     @Test fun missingProfileBlocksBrowserButNotReadiness() {

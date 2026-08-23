@@ -227,7 +227,7 @@ private fun ReadinessContent(eval: ReadinessService.Evaluation) {
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Warnings", style = MaterialTheme.typography.titleSmall)
-                state.warnings.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
+                state.warnings.forEach { Text("\u2022 ${it.message}", style = MaterialTheme.typography.bodyMedium) }
             }
         }
     }
