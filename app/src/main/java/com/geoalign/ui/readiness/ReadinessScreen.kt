@@ -8,7 +8,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -18,9 +20,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import com.geoalign.core.model.LocationProfile
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.geoalign.core.monitor.MonitorReason
 import com.geoalign.data.profiles.ProfileFactory
-import com.geoalign.data.readiness.ReadinessService
 import com.geoalign.di.AppGraph
 import com.geoalign.ui.components.AppScaffold
 import com.geoalign.ui.components.DisclosureRow
@@ -31,9 +35,8 @@ import com.geoalign.ui.components.SecondaryAction
 import com.geoalign.ui.components.SecondaryActionRow
 import com.geoalign.ui.components.TextAction
 import com.geoalign.ui.state.ActionId
-import com.geoalign.ui.state.LoadPhase
+import com.geoalign.ui.state.LiveReadiness
 import com.geoalign.ui.state.NoVpnAcceptance
-import com.geoalign.ui.state.ReadinessPresentationInput
 import com.geoalign.ui.state.ReadinessPresenter
 import com.geoalign.ui.theme.Spacing
 import kotlinx.coroutines.delay
@@ -47,10 +50,11 @@ private const val CLOCK_TICK_MILLIS = 30_000L
  * Readiness screen (spec §25). Answers one question — is the browser aligned and safe to open? —
  * and keeps everything technical behind progressive disclosure.
  *
- * All the decisions live in [ReadinessPresenter], which is pure and unit-tested. This composable
- * gathers observations, renders what the presenter returns, and decides nothing itself. That split
- * is deliberate: the stale-profile bug in 3d3108b was business logic inside a @Composable, where
- * no test could reach it.
+ * All the decisions live in [ReadinessPresenter] and [LiveReadiness], which are pure and
+ * unit-tested, and in the application-scoped `AlignmentMonitor`, whose state machine is pure Kotlin
+ * in `core/`. This composable gathers observations, renders what the presenter returns, and decides
+ * nothing itself. That split is deliberate: the stale-profile bug in 3d3108b was business logic
+ * inside a @Composable, where no test could reach it.
  */
 @Composable
 fun ReadinessScreen(
@@ -61,59 +65,40 @@ fun ReadinessScreen(
     val context = LocalContext.current
     val service = remember { AppGraph.readinessService(context) }
     val store = remember { AppGraph.profileStore(context) }
+    val monitor = remember { AppGraph.alignmentMonitor(context) }
     val scope = rememberCoroutineScope()
 
-    var phase by remember { mutableStateOf(LoadPhase.INITIAL) }
-    var evaluation by remember { mutableStateOf<ReadinessService.Evaluation?>(null) }
-    var profile by remember { mutableStateOf<LocationProfile?>(null) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var checkedAtMillis by remember { mutableStateOf<Long?>(null) }
+    // The single source of live truth. Every observation the screen renders — transport, exit,
+    // profile, freshness — arrives through here, so nothing on screen can disagree with what the
+    // monitor last saw, and a VPN that drops while the screen is open is visible without a tap.
+    val snapshot by monitor.snapshots.collectAsState()
+
     var acceptedNoVpn by remember { mutableStateOf(false) }
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var matching by remember { mutableStateOf(false) }
+    var matchError by remember { mutableStateOf<String?>(null) }
 
     var showDetails by remember { mutableStateOf(false) }
     var showDisclaimer by remember { mutableStateOf(false) }
     var showNoVpnPrompt by remember { mutableStateOf(false) }
 
-    fun refresh(initial: Boolean = false) {
-        phase = if (initial) LoadPhase.INITIAL else LoadPhase.REFRESHING
-        errorMessage = null
-        scope.launch {
-            runCatching {
-                val saved = store.list().firstOrNull()
-                val result = service.evaluate(
-                    profileSelected = saved != null,
-                    userAcceptedNoVpn = acceptedNoVpn,
-                )
-                saved to result
-            }.onSuccess { (saved, result) ->
-                profile = saved
-                evaluation = result
-                // A detected VPN retires any standing "continue without a VPN" opt-in, so a later
-                // drop blocks again instead of silently inheriting an agreement to a different
-                // situation.
-                acceptedNoVpn = NoVpnAcceptance.next(acceptedNoVpn, result.inputs.vpn)
-                checkedAtMillis = System.currentTimeMillis()
-                nowMillis = System.currentTimeMillis()
-                phase = LoadPhase.LOADED
-            }.onFailure {
-                errorMessage = it.message ?: "readiness check failed"
-                phase = LoadPhase.ERROR
-            }
-        }
+    fun refresh() {
+        matchError = null
+        nowMillis = System.currentTimeMillis()
+        monitor.refreshNow(MonitorReason.MANUAL_REFRESH)
     }
 
     /**
      * One-tap "Match Browser to VPN" (spec §9).
      *
-     * The estimate is re-fetched here rather than read from the cached evaluation. Reading the
-     * cache saved whatever was observed at the *last* refresh, so changing VPN exit and pressing
+     * The estimate is re-fetched here rather than read from the monitor's last snapshot. Reading
+     * the cache saved whatever was observed at the *last* check, so changing VPN exit and pressing
      * this stored the previous country and then re-rendered with the new one. Evaluating first
      * makes what we save and what we display come from the same observation.
      */
     fun matchToVpn() {
-        phase = LoadPhase.REFRESHING
-        errorMessage = null
+        matching = true
+        matchError = null
         scope.launch {
             runCatching {
                 val fresh = service.evaluate(
@@ -130,22 +115,41 @@ fun ReadinessScreen(
                 ) ?: throw IllegalStateException("estimate lacked coordinates")
                 store.clear()
                 store.upsert(built)
-                built to fresh
-            }.onSuccess { (built, fresh) ->
-                profile = built
-                evaluation = fresh
-                acceptedNoVpn = NoVpnAcceptance.next(acceptedNoVpn, fresh.inputs.vpn)
-                checkedAtMillis = System.currentTimeMillis()
+            }.onSuccess {
+                matching = false
                 nowMillis = System.currentTimeMillis()
-                phase = LoadPhase.LOADED
+                // The monitor re-reads the store, so the profile that was saved and the state
+                // machine's verdict on it come from one observation rather than two.
+                monitor.refreshNow(MonitorReason.MANUAL_REFRESH)
             }.onFailure {
-                errorMessage = it.message ?: "could not save profile"
-                phase = LoadPhase.ERROR
+                matching = false
+                matchError = it.message ?: "could not save profile"
             }
         }
     }
 
-    LaunchedEffect(Unit) { refresh(initial = true) }
+    // Returning from the system VPN settings re-evaluates on its own — the point of this screen no
+    // longer needing a "Check again" tap. A LifecycleEventObserver is brought up to the owner's
+    // current state when registered, so this also covers first composition and needs no separate
+    // initial-load effect.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, monitor) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                monitor.refreshNow(MonitorReason.LIFECYCLE_RESUMED)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // A detected VPN retires any standing "continue without a VPN" opt-in, so a later drop blocks
+    // again instead of silently inheriting an agreement to a different situation.
+    LaunchedEffect(snapshot.monitor.transport) {
+        acceptedNoVpn = NoVpnAcceptance.next(acceptedNoVpn, snapshot.monitor.transport)
+        monitor.setUserAcceptedNoVpn(acceptedNoVpn)
+        nowMillis = System.currentTimeMillis()
+    }
 
     // Without this the freshness line is frozen at whatever it said on load, so "moments ago"
     // never becomes "8 min ago" and the staleness downgrade never fires while the screen is open.
@@ -157,14 +161,12 @@ fun ReadinessScreen(
     }
 
     val ui = ReadinessPresenter.present(
-        ReadinessPresentationInput(
-            phase = phase,
-            evaluation = evaluation,
-            profile = profile,
-            errorMessage = errorMessage,
-            checkedAtMillis = checkedAtMillis,
+        LiveReadiness.input(
+            snapshot = snapshot,
             nowMillis = nowMillis,
             userAcceptedNoVpn = acceptedNoVpn,
+            pendingAction = matching,
+            actionError = matchError,
         ),
     )
 
@@ -264,6 +266,7 @@ fun ReadinessScreen(
                         onClick = {
                             showNoVpnPrompt = false
                             acceptedNoVpn = true
+                            monitor.setUserAcceptedNoVpn(true)
                             refresh()
                         },
                         modifier = Modifier.testTag("no_vpn_confirm"),
