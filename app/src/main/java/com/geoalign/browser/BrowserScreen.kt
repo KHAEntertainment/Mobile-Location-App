@@ -358,6 +358,15 @@ fun BrowserScreen(onExit: () -> Unit) {
                         @Suppress("DEPRECATION")
                         allowUniversalAccessFromFileURLs = false
                         mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                        // Honor the page's <meta viewport> the way mobile Chrome does. Without this
+                        // (WebView default useWideViewPort=false), responsive sites are laid out at
+                        // the raw view width, so window.innerWidth/innerHeight and the
+                        // (orientation: landscape) media query can read as a wide/landscape desktop —
+                        // which is what makes Tinder show its "portrait view" gate. Enabling these
+                        // makes width=device-width resolve to the real CSS width, so orientation
+                        // reads portrait like it does in Chrome.
+                        useWideViewPort = true
+                        loadWithOverviewMode = true
                         // Present the active device's UA from the very first request.
                         userAgentString = uaFor(device)
                     }
