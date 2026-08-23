@@ -353,6 +353,16 @@ fun BrowserScreen(onExit: () -> Unit) {
                     WebView.setWebContentsDebuggingEnabled(true)
                 }
                 WebView(ctx).apply {
+                    // AndroidView leaves a child's own LayoutParams at WRAP_CONTENT and relies on
+                    // Compose to measure it. WebView, however, derives its CSS viewport height from
+                    // its LayoutParams, so a wrap-content height makes it report a viewport height
+                    // of 0 — `100vh` resolves to 0 and `(orientation: landscape)` matches on every
+                    // page, because a 368x0 viewport has an infinite aspect ratio. MATCH_PARENT
+                    // gives it a bounded height to measure against.
+                    layoutParams = android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
                     settings.apply {
                         javaScriptEnabled = true
                         domStorageEnabled = true
